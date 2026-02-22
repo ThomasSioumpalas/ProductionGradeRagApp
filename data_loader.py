@@ -1,9 +1,10 @@
-import fitz 
-from sentence_transformers import SentenceTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from dotenv import load_dotenv
+import re
 from pathlib import Path
-import os
+
+import fitz
+from dotenv import load_dotenv
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
@@ -15,7 +16,7 @@ class FinancialDataLoader:
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             # Adding separators ensures financial tables aren't split mid-line
-            separators=["\n\n", "\n", ".", " ", ""] 
+            separators=["\n\n", "\n", ".", " ", ""],
         )
         
     def _get_embed_model(self):
@@ -23,19 +24,61 @@ class FinancialDataLoader:
             self._embed_model = SentenceTransformer("BAAI/bge-m3")
         return self._embed_model
 
+    def _resolve_pdf_path(self, path: str) -> Path:
+        raw_path = str(path).strip().strip('"').strip("'")
+        if raw_path.lower().startswith("file://"):
+            raw_path = raw_path[7:]
+
+        linux_like = raw_path.replace("\\", "/")
+        windows_drive = re.match(r"^[A-Za-z]:/", linux_like) is not None
+        relative_from_windows = linux_like.lstrip("/") if windows_drive else linux_like
+        requested = Path(relative_from_windows)
+        basename = Path(linux_like).name or requested.name
+
+        candidates: list[Path] = [Path(raw_path)]
+        if windows_drive:
+            candidates.append(Path("/") / relative_from_windows)
+
+        if requested.is_absolute():
+            candidates.append(requested)
+        else:
+            candidates.extend([Path.cwd() / requested, Path("/app") / requested])
+
+        if basename:
+            candidates.extend(
+                [
+                    Path.cwd() / "documents" / basename,
+                    Path("/app/documents") / basename,
+                    Path.cwd() / basename,
+                    Path("/app") / basename,
+                ]
+            )
+
+        seen: set[Path] = set()
+        for candidate in candidates:
+            c = candidate.resolve(strict=False)
+            if c in seen:
+                continue
+            seen.add(c)
+            if c.exists() and c.is_file():
+                return c
+
+        searchable_dirs = [Path.cwd() / "documents", Path("/app/documents"), Path.cwd(), Path("/app")]
+        nearby: list[str] = []
+        for directory in searchable_dirs:
+            if directory.exists() and directory.is_dir():
+                nearby.extend(sorted(p.name for p in directory.glob("*.pdf"))[:10])
+
+        looked_in = ", ".join(str(p) for p in seen) if seen else str(requested)
+        available = sorted(set(nearby)) if nearby else ["<no PDFs discovered>"]
+        raise FileNotFoundError(
+            f"Missing PDF: {path}. Looked in: {looked_in}. Available PDFs: {available}"
+        )
+
 
     def load_pdf_text(self, path: str) -> str:
-        p = Path(path)
-        # Fix: This block must be indented
-        if not p.exists():
-            base = p.parent if p.parent != Path("") else Path("/app")
-            try:
-                nearby = [x.name for x in base.iterdir()][:10]
-            except Exception:
-                nearby = ["<dir not found>"]
-            raise FileNotFoundError(f"Missing PDF: {path}. Found in {base}: {nearby}")
-
-        with fitz.open(str(p)) as doc:
+        resolved_path = self._resolve_pdf_path(path)
+        with fitz.open(str(resolved_path)) as doc:
             return "\n".join(page.get_text() for page in doc)
         
         
@@ -52,7 +95,9 @@ class FinancialDataLoader:
 
         # BGE-M3 performs better with a retrieval instruction for queries
         if is_query:
-            processed_chunks = [f"Represent this query for retrieving financial metrics: {text}" for text in chunks]
+            processed_chunks = [
+                f"Represent this query for retrieving financial metrics: {text}" for text in chunks
+            ]
         else:
             processed_chunks = chunks
 
@@ -60,7 +105,7 @@ class FinancialDataLoader:
         embeddings = self._get_embed_model().encode(
             processed_chunks, 
             batch_size=32, 
-            normalize_embeddings=True
+            normalize_embeddings=True,
         )
         return embeddings.tolist()
 

@@ -17,6 +17,7 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - INNGEST_EVENT_KEY=any_key_for_local_dev
+      - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_DEV=1  # Required for local Inngest development
     depends_on:
       - qdrant

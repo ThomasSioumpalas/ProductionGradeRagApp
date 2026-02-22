@@ -4,7 +4,7 @@ import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
-
+from pathlib import Path
 import inngest
 import inngest.fast_api
 from inngest.experimental import ai
@@ -29,6 +29,30 @@ loader = FinancialDataLoader()
 db_storage: QdrantStorage | None = None
 
 
+def _extract_ingest_inputs(event_data: object) -> tuple[str, str | None]:
+    """Accept either plain path strings or object payloads for ingestion events."""
+    if isinstance(event_data, str):
+        pdf_path = event_data.strip()
+        source_id = None
+    elif isinstance(event_data, dict):
+        raw_path = (
+            event_data.get("pdf_path")
+            or event_data.get("path")
+            or event_data.get("file_path")
+            or event_data.get("pdf")
+        )
+        pdf_path = str(raw_path or "").strip()
+        source_id = str(event_data.get("source_id") or "").strip() or None
+    else:
+        raise ValueError("event.data must be either a string path or an object with pdf_path")
+
+    if not pdf_path:
+        raise ValueError("A PDF path is required. Use a plain string or event.data.pdf_path")
+
+    return pdf_path, source_id
+
+
+
 def get_db_storage() -> QdrantStorage:
     """Lazy-init Qdrant so FastAPI/Inngest can boot even if Qdrant is still starting."""
     global db_storage
@@ -44,13 +68,16 @@ def get_db_storage() -> QdrantStorage:
 )
 async def rag_ingest_pdf(ctx: inngest.Context):
     def _load(ctx: inngest.Context) -> RAGChunkAndSrc:
-        pdf_path = ctx.event.data["pdf_path"]
-        source_id = ctx.event.data.get("source_id", pdf_path)
+        pdf_path, source_id = _extract_ingest_inputs(ctx.event.data)
+        if not pdf_path:
+            raise ValueError("event.data.pdf_path is required")
+
+        resolved_source_id = source_id or Path(pdf_path.replace("\\", "/")).name
 
         text = loader.load_pdf_text(pdf_path)
         chunks = loader.split_into_chunks(text)
 
-        return RAGChunkAndSrc(chunks=chunks, source_id=source_id)
+        return RAGChunkAndSrc(chunks=chunks, source_id=resolved_source_id)
 
     def _upsert(chunks_and_src: RAGChunkAndSrc) -> RAGUpsertResult:
         chunks = chunks_and_src.chunks
