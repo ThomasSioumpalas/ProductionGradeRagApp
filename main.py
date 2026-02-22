@@ -5,6 +5,7 @@ import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 import inngest
+from inngest import ai
 import inngest.fast_api
 from dotenv import load_dotenv
 
@@ -27,7 +28,15 @@ inngest_client = inngest.Inngest(
 # Initialize our components
 # Use dim=1024 for BGE-M3
 loader = FinancialDataLoader()
-db_storage = QdrantStorage(dim=1024)
+db_storage: QdrantStorage | None = None
+
+
+def get_db_storage() -> QdrantStorage:
+    """Lazy-init Qdrant so FastAPI/Inngest can boot even if Qdrant is still starting."""
+    global db_storage
+    if db_storage is None:
+        db_storage = QdrantStorage(dim=1024)
+    return db_storage
 
 @inngest_client.create_function(
     fn_id="RAG: Ingest PDF",
@@ -53,8 +62,7 @@ async def rag_ingest_pdf(ctx: inngest.Context):
         vecs = loader.embed_texts(chunks)
         
         # Store in Qdrant
-        db_storage.upsert_chunks(texts=chunks, vectors=vecs, source_name=source_id)
-        
+        get_db_storage().upsert_chunks(texts=chunks, vectors=vecs, source_name=source_id)        
         return RAGUpsertResult(ingested=len(chunks))
 
     chunks_and_src = await ctx.step.run("load-and-chunk", lambda: _load(ctx), output_type=RAGChunkAndSrc)
@@ -72,7 +80,7 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
         query_vec = loader.embed_texts([question], is_query=True)[0]
         
         # Use our search logic
-        found = db_storage.search(query_vec, top_k)
+        found = get_db_storage().search(query_vec, top_k)
         
         # Map Qdrant response to RAGSearchResult schema
         contexts = [item["text"] for item in found]

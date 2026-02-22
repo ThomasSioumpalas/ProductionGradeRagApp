@@ -1,4 +1,3 @@
-import os
 import fitz 
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -6,17 +5,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Ensure you use the full path for BGE-M3
-embed_model = SentenceTransformer('BAAI/bge-m3')
 
 class FinancialDataLoader:
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 100):
+        self._embed_model = None
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             # Adding separators ensures financial tables aren't split mid-line
             separators=["\n\n", "\n", ".", " ", ""] 
         )
+        
+    def _get_embed_model(self):
+        if self._embed_model is None:
+            self._embed_model = SentenceTransformer("BAAI/bge-m3")
+        return self._embed_model
+
 
     def load_pdf_text(self, path: str) -> str:
         """Extracts full text from PDF as a single string."""
@@ -44,7 +48,7 @@ class FinancialDataLoader:
             processed_chunks = chunks
 
         # Batch size 32 is a safe default for BGE-M3 on most systems
-        embeddings = embed_model.encode(
+        embeddings = self._get_embed_model().encode(
             processed_chunks, 
             batch_size=32, 
             normalize_embeddings=True

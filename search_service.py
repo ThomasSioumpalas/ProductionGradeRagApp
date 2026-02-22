@@ -8,4 +8,4 @@ class SearchService:
 
     def semantic_search(self, query: str, top_k: int = 5, source_file: str | None = None):
         query_vec = self.embed_model.encode([query])[0].tolist()
-        return self.vector_store.search(query_vector=query_vec, top_k=top_k, source_file=source_file)
+        return self.vector_store.search(query_vector=query_vec, top_k=top_k, source_filter=source_file)
