@@ -9,7 +9,7 @@ services:
 
   inngest:
     image: inngest/inngest:latest
-    container_name: inngest-dev-server
+    container_name: inngest-server
     ports:
       - "8288:8288"
     command: ["inngest", "dev", "-u", "http://rag-app:8000/api/inngest"]
