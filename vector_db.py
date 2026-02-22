@@ -2,6 +2,7 @@ import os
 import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.models import VectorParams, Distance, PointStruct, Filter, FieldCondition, MatchValue
+import hashlib
 
 class QdrantStorage:
     def __init__(self, collection_name="financial_docs", dim=1024):
@@ -24,8 +25,9 @@ class QdrantStorage:
     def upsert_chunks(self, texts: list[str], vectors: list[list[float]], source_name: str):
         points = []
         for i, (text, vector) in enumerate(zip(texts, vectors)):
+            point_id = hashlib.md5(f"{source_name}_{i}".encode()).hexdigest()
             points.append(PointStruct(
-                id=str(uuid.uuid4()), # Generate a unique ID for every chunk
+                id=point_id,
                 vector=vector,
                 payload={
                     "text": text, 

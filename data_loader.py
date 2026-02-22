@@ -2,6 +2,8 @@ import fitz
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
+from pathlib import Path
+import os
 
 load_dotenv()
 
@@ -23,13 +25,20 @@ class FinancialDataLoader:
 
 
     def load_pdf_text(self, path: str) -> str:
-        """Extracts full text from PDF as a single string."""
-        parts: list[str] = []
-        with fitz.open(path) as doc:
-            for page in doc:
-                parts.append(page.get_text())
-        return "\n".join(parts).strip()
+        p = Path(path)
+        # Fix: This block must be indented
+        if not p.exists():
+            base = p.parent if p.parent != Path("") else Path("/app")
+            try:
+                nearby = [x.name for x in base.iterdir()][:10]
+            except Exception:
+                nearby = ["<dir not found>"]
+            raise FileNotFoundError(f"Missing PDF: {path}. Found in {base}: {nearby}")
 
+        with fitz.open(str(p)) as doc:
+            return "\n".join(page.get_text() for page in doc)
+        
+        
     def split_into_chunks(self, text: str) -> list[str]:
         """Splits the full text into manageable chunks for the LLM."""
         if not text or not text.strip():

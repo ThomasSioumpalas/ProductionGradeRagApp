@@ -7,16 +7,6 @@ services:
     volumes:
       - qdrant_storage:/qdrant/storage
 
-  inngest:
-    image: inngest/inngest:latest
-    container_name: inngest-server
-    ports:
-      - "8288:8288"
-    depends_on:
-        rag-app:
-         condition: service_healthy
-    command: ["inngest", "dev", "-u", "http://rag-app:8000/api/inngest"]
-
   rag-app:
     build: .
     container_name: financial-ai-agent
@@ -27,17 +17,29 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - INNGEST_EVENT_KEY=any_key_for_local_dev
-      - INNGEST_URL=http://inngest:8288
+      - INNGEST_DEV=1  # Required for local Inngest development
     depends_on:
       - qdrant
     volumes:
       - .:/app
+      # CRITICAL: Maps your local PDF folder into the container
+      - ./documents:/app/documents 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s # Gives BGE-M3 model time to download
+
+  inngest:
+    image: inngest/inngest:latest
+    container_name: inngest-server
+    ports:
+      - "8288:8288"
+    depends_on:
+      rag-app:
+        condition: service_healthy
+    command: ["inngest", "dev", "-u", "http://rag-app:8000/api/inngest"]
 
 volumes:
   qdrant_storage:
