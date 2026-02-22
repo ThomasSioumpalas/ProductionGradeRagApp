@@ -13,7 +13,7 @@ from qdrant_client.models import (
 
 
 class QdrantStorage:
-    def __init__(self, collection_name: str = "financial_docs", dim: int = 1024):
+    def __init__(self, collection_name: str = "financial_docs", dim: int = 384):
         url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.client = QdrantClient(url=url)
         self.collection = collection_name
@@ -40,7 +40,6 @@ class QdrantStorage:
             if not text or not text.strip():
                 continue
 
-            # ✅ Use UUID5 — deterministic (same source+index = same ID) and valid for Qdrant
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{source_name}_{i}"))
             points.append(
                 PointStruct(

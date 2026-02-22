@@ -7,7 +7,6 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
-# Directories to search for PDFs, in priority order
 PDF_SEARCH_DIRS = [
     Path("/app/documents"),
     Path("/app"),
@@ -27,17 +26,14 @@ class FinancialDataLoader:
 
     def _get_embed_model(self) -> SentenceTransformer:
         if self._embed_model is None:
-            self._embed_model = SentenceTransformer("BAAI/bge-m3")
+            self._embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         return self._embed_model
-
+    
     def _resolve_pdf_path(self, path: str) -> Path:
-        """Find a PDF file by checking the given path directly, then well-known directories."""
-        # Try the path as given first
         direct = Path(path)
         if direct.exists() and direct.is_file():
             return direct
 
-        # Try finding by filename in known directories
         filename = Path(path).name
         for directory in PDF_SEARCH_DIRS:
             candidate = directory / filename
@@ -53,6 +49,11 @@ class FinancialDataLoader:
             f"PDF not found: '{path}'. "
             f"Available PDFs: {sorted(set(available)) or ['<none found>']}"
         )
+        
+        
+        
+        
+        
 
     def load_pdf_text(self, path: str) -> str:
         resolved = self._resolve_pdf_path(path)

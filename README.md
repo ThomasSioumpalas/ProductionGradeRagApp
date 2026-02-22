@@ -1,65 +1,59 @@
-Event-Driven RAG Pipeline with FastAPI, Inngest, and Qdrant
+Financial RAG Agent
 
-A Retrieval-Augmented Generation (RAG) application that allows users to upload PDF documents, store their content as vector embeddings, and ask questions based strictly on those documents.
+A local RAG (Retrieval-Augmented Generation) app that lets you ingest financial PDFs and ask questions about them. Built with FastAPI, Inngest, Qdrant, and Llama 3 LLM via Groq.
 
-The system retrieves relevant text chunks and uses an LLM to generate grounded, context-aware answers — reducing hallucinations and improving response accuracy.
+How it works
 
-Overview
+1. You send a PDF to the ingest pipeline — it gets chunked, embedded, and stored in Qdrant
+2. You ask a question — it searches for the most relevant chunks and sends them to Llama 3 for an answer
 
-This application demonstrates a production-style RAG workflow built around asynchronous event processing.
+Setup
 
-Core capabilities:
+Create a `.env` file in the project root:
 
-- Upload PDF documents  
-- Extract and chunk text  
-- Generate embeddings  
-- Store vectors in Qdrant  
-- Retrieve relevant context  
-- Generate document-based answers  
+```
+GROQ_API_KEY=gsk_...
+```
 
+Place your PDF files in the `documents/` folder, then start everything:
 
-Tech Stack
+- App: http://localhost:8000
+- Inngest UI: http://localhost:8288
+- Qdrant UI: http://localhost:6333/dashboard
 
-Backend
-- FastAPI
-- Inngest
-- OpenAI Python SDK
-- LlamaIndex
-- Qdrant
+Usage
 
-Frontend
-- Streamlit
+Ingest a PDF
 
-Infrastructure
-- python-dotenv
-- Uvicorn
+```json
+{
+  "data": {
+    "pdf_path": "your_document.pdf",
+    "source_id": "my_doc"
+  }
+}
+```
 
-System Architecture
-PDF Ingestion Flow
+Query a PDF
 
-1. User uploads a PDF via Streamlit  
-2. Streamlit sends a `rag/ingest_pdf` event to Inngest  
-3. The Inngest function:
-   - Extracts PDF text  
-   - Splits text into chunks  
-   - Converts chunks into embeddings  
-   - Upserts vectors into Qdrant  
+```json
+{
+  "data": {
+    "question": "What is the total revenue for 2024?",
+    "top_k": 5
+  }
+}
+```
 
-Question Answering Flow
+> Always ingest before querying. Once ingested, vectors persist in Qdrant across restarts.
 
-1. User submits a question  
-2. The application queries Qdrant for relevant chunks  
-3. Retrieved context is sent to the LLM  
-4. The model generates an answer grounded in the stored document data  
-
-Setup Guide
-
-1. Install Dependencies
-
-This repository uses pyproject.toml.
-
-Install with your preferred package manager:
+Useful commands
 
 ```bash
-uv sync
+# Start everything
+docker-compose up
 
+# Rebuild after code changes
+docker-compose build
+
+```

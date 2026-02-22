@@ -7,9 +7,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from pathlib import Path
+import httpx
 import inngest
 import inngest.fast_api
-from inngest.experimental import ai
 
 from data_loader import FinancialDataLoader
 from vector_db import QdrantStorage
@@ -27,33 +27,45 @@ inngest_client = inngest.Inngest(
 
 loader = FinancialDataLoader()
 
-# Thread pool for CPU-heavy blocking work (PDF parsing, embedding)
-# This keeps the async event loop free so FastAPI can still handle
-# Inngest's sync pings while a step is running.
 thread_pool = ThreadPoolExecutor(max_workers=2)
 
-# Simple lazy singleton
 _db_storage: QdrantStorage | None = None
 
 def get_db_storage() -> QdrantStorage:
     global _db_storage
     if _db_storage is None:
-        _db_storage = QdrantStorage(dim=1024)
+        _db_storage = QdrantStorage(dim=384)
     return _db_storage
 
 
 async def run_in_thread(fn):
-    """Run a blocking sync function in the thread pool without blocking the event loop."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(thread_pool, fn)
 
 
-# ---------------------------------------------------------------------------
-# Ingest PDF
-# ---------------------------------------------------------------------------
+async def call_groq(messages: list, max_tokens: int = 1024, temperature: float = 0.1) -> str:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+            timeout=30,
+        )
+        if response.status_code != 200:
+            print(f"[Groq] Error {response.status_code}: {response.text}")
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
 
 def _load_and_chunk(pdf_path: str, source_id: str | None) -> RAGChunkAndSrc:
-    """Blocking: load PDF from disk and split into chunks."""
     resolved_source_id = source_id or Path(pdf_path.replace("\\", "/")).name
     text = loader.load_pdf_text(pdf_path)
     chunks = loader.split_into_chunks(text)
@@ -61,7 +73,6 @@ def _load_and_chunk(pdf_path: str, source_id: str | None) -> RAGChunkAndSrc:
 
 
 def _embed_and_upsert(chunks_and_src: RAGChunkAndSrc) -> RAGUpsertResult:
-    """Blocking: run BGE-M3 embeddings and store vectors in Qdrant."""
     vecs = loader.embed_texts(chunks_and_src.chunks)
     get_db_storage().upsert_chunks(
         texts=chunks_and_src.chunks,
@@ -77,7 +88,6 @@ def _embed_and_upsert(chunks_and_src: RAGChunkAndSrc) -> RAGUpsertResult:
     throttle=inngest.Throttle(limit=2, period=datetime.timedelta(minutes=1)),
 )
 async def rag_ingest_pdf(ctx: inngest.Context):
-    # Extract inputs once, before any steps
     event_data = ctx.event.data
     if isinstance(event_data, str):
         pdf_path = event_data.strip()
@@ -97,9 +107,6 @@ async def rag_ingest_pdf(ctx: inngest.Context):
     if not pdf_path:
         raise ValueError("A PDF path is required")
 
-    # ✅ run_in_thread keeps the event loop free during heavy CPU work.
-    # Inngest's sync pings (PUT /api/inngest) can still be answered
-    # while PDF parsing and embedding run in the background thread.
     chunks_and_src = await ctx.step.run(
         "load-and-chunk",
         lambda: run_in_thread(lambda: _load_and_chunk(pdf_path, source_id)),
@@ -113,12 +120,7 @@ async def rag_ingest_pdf(ctx: inngest.Context):
     return result.model_dump()
 
 
-# ---------------------------------------------------------------------------
-# Query PDF
-# ---------------------------------------------------------------------------
-
 def _embed_and_search(question: str, top_k: int) -> RAGSearchResult:
-    """Blocking: embed query with BGE-M3 and search Qdrant."""
     query_vec = loader.embed_texts([question], is_query=True)[0]
     found = get_db_storage().search(query_vec, top_k)
     contexts = [item["text"] for item in found]
@@ -134,14 +136,13 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
     question = ctx.event.data["question"].strip()
     top_k = int(ctx.event.data.get("top_k", 5))
 
-    # ✅ Same pattern — embedding runs in thread, event loop stays responsive
     found = await ctx.step.run(
         "embed-and-search",
         lambda: run_in_thread(lambda: _embed_and_search(question, top_k)),
         output_type=RAGSearchResult,
     )
 
-    context_block = "\n\n".join(f"- {c}" for c in found.contexts)
+    context_block = "\n\n".join(f"- {c[:500]}" for c in found.contexts[:3])
     user_content = (
         "Use the following financial context to answer the question.\n\n"
         f"Context:\n{context_block}\n\n"
@@ -150,38 +151,25 @@ async def rag_query_pdf_ai(ctx: inngest.Context):
         "(Revenue, Net Income, etc.), list them clearly."
     )
 
-    adapter = ai.openai.Adapter(
-        auth_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini",
-    )
-
-    res = await ctx.step.ai.infer(
+    answer = await ctx.step.run(
         "llm-answer",
-        adapter=adapter,
-        body={
-            "max_tokens": 1024,
-            "temperature": 0.1,
-            "messages": [
+        lambda: call_groq(
+            messages=[
                 {"role": "system", "content": "You are a professional financial analyst assistant."},
                 {"role": "user", "content": user_content},
-            ],
-        },
+            ]
+        ),
     )
 
-    answer = res["choices"][0]["message"]["content"].strip()
     return {"answer": answer, "sources": found.sources, "num_contexts": len(found.contexts)}
 
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
 
 app = FastAPI()
 
 
 @app.get("/")
 def read_root():
-    return {"status": "Financial Agent Online", "model": "BGE-M3"}
+    return {"status": "Financial Agent Online", "model": "MiniLM + Llama3"}
 
 
 @app.post("/download-report")

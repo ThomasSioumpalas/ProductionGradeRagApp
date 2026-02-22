@@ -19,13 +19,15 @@ services:
       - INNGEST_EVENT_KEY=any_key_for_local_dev
       - INNGEST_BASE_URL=http://inngest:8288
       - INNGEST_DEV=1
+      - TRANSFORMERS_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
+      - HF_HOME=/cache/huggingface
     depends_on:
       - qdrant
     volumes:
       - .:/app
       - ./documents:/app/documents
-    # ✅ 2 workers: one handles Inngest function execution,
-    #    the other stays free to answer sync pings (PUT /api/inngest)
+      - hf_cache:/cache/huggingface
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
@@ -46,3 +48,4 @@ services:
 
 volumes:
   qdrant_storage:
+  hf_cache:
