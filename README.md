@@ -45,7 +45,6 @@ Query a PDF
 }
 ```
 
-> Always ingest before querying. Once ingested, vectors persist in Qdrant across restarts.
 
 Useful commands
 
