@@ -47,7 +47,6 @@ def fact(**overrides):
             {
                 "metric_id": "income_statement_8",
                 "year": 2025,
-                "company": "Example SA",
                 "scope": "consolidated",
                 "currency": "EUR",
                 "raw_value": "1,234.5",
@@ -87,6 +86,7 @@ def test_bad_numbers(raw):
 
 
 def test_grounding_and_scale(settings, page):
+    settings.company = "Any Excel display label"
     c = validate_fact(fact(), page, settings)
     assert c["value"] == "1.2345"
     assert c["file"] == "annual.pdf"
@@ -111,7 +111,6 @@ def test_grounding_and_scale(settings, page):
         {"scope": "standalone"},
         {"currency": "USD"},
         {"year": 2018},
-        {"company": "Other SA"},
         {"page": 2},
         {"source_file": "another.pdf"},
         {"metric_id": "market_inputs_18"},

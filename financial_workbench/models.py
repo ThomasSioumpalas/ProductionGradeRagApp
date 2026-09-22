@@ -21,7 +21,6 @@ class Settings(StrictModel):
 class ExtractedFact(StrictModel):
     metric_id: str
     year: int
-    company: str
     scope: Literal["consolidated", "standalone"]
     currency: str
     # Raw number and explicit separator make conversion deterministic, not LLM arithmetic.

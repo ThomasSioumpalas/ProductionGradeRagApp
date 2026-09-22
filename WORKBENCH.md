@@ -45,7 +45,7 @@ Use **one API worker**. The persistent queue and SQLite database are designed fo
 
 ## Workflow
 
-1. Select English or Greek. Enter the company name as it appears in the annual report, latest fiscal year, reporting scope, currency and output scales.
+1. Select English or Greek. Enter the company label you want displayed in Excel, plus the latest fiscal year, reporting scope, currency and output scales. The label is not used to accept or reject PDF facts.
 2. Upload annual PDFs for one company and matching reporting scope. Up to 10 PDFs, 40 MB each, 100 MB total, 600 pages per PDF and 1,000 pages per set are supported.
 3. Wait for extraction. The service splits every PDF page into overlapping, page-aware chunks. It ranks financial chunks, selects a bounded and diverse set for structured extraction, then sends those chunks in small provider batches. All pages stay available for source viewing and questions. The counter shows provider batches, so it advances steadily even for a large report. Scanned/image-only documents need OCR first.
 4. Review candidates. Inspect the raw quote, year/scope/unit context and original PDF. A citation proves where the text occurs; it does **not** prove that the model chose the right year or financial concept. The review step is required for that reason.
