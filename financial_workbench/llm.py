@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 
 import httpx
 
@@ -14,6 +15,31 @@ class IncompleteOutputError(ProviderError):
     def __init__(self, reason, message):
         super().__init__(message)
         self.reason = reason
+
+
+def retry_delay(response, attempt):
+    """Honor Groq's retry window, including longer daily-token resets."""
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return min(86_400, max(1, float(header)))
+        except ValueError:
+            pass
+
+    try:
+        message = response.json().get("error", {}).get("message", "")
+    except (ValueError, AttributeError):
+        message = ""
+    match = re.search(r"try again in\s+((?:\d+(?:\.\d+)?\s*[hms]\s*)+)", message, re.I)
+    if match:
+        parts = re.findall(r"(\d+(?:\.\d+)?)\s*([hms])", match.group(1), re.I)
+        seconds = sum(
+            float(value) * {"h": 3600, "m": 60, "s": 1}[unit.lower()]
+            for value, unit in parts
+        )
+        if seconds:
+            return min(86_400, max(1, seconds))
+    return min(30, 2**attempt)
 
 
 async def completion(messages, structured=False):
@@ -64,13 +90,7 @@ async def completion(messages, structured=False):
             if (
                 response.status_code == 429 or response.status_code >= 500
             ) and attempt < 4:
-                try:
-                    delay = min(
-                        30,
-                        max(1, float(response.headers.get("retry-after", 2**attempt))),
-                    )
-                except ValueError:
-                    delay = 2**attempt
+                delay = retry_delay(response, attempt)
                 await asyncio.sleep(delay)
                 continue
             if response.is_error:

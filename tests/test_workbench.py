@@ -541,3 +541,20 @@ def test_provider_schema_and_incomplete_output(monkeypatch):
     )
     with pytest.raises(ProviderError, match="incomplete"):
         asyncio.run(completion([{"role": "user", "content": "test"}], structured=True))
+
+
+def test_provider_retry_delay_parses_daily_limit_window():
+    from financial_workbench.llm import retry_delay
+
+    class FakeResponse:
+        headers = {}
+
+        @staticmethod
+        def json():
+            return {
+                "error": {
+                    "message": "Tokens per day limit reached. Please try again in 3m42.047999999s."
+                }
+            }
+
+    assert retry_delay(FakeResponse(), 0) == pytest.approx(222.048)
