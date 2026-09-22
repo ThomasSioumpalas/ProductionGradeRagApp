@@ -28,6 +28,7 @@ class ExtractedFact(StrictModel):
     raw_value: str
     decimal_separator: Literal[".", ","]
     scale: Literal[1, 1000, 1000000]
+    source_file: str = Field(min_length=1, max_length=200)
     page: int
     quote: str
     context_quote: str

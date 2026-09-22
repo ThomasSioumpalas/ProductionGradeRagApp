@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from financial_workbench.api import create_app
-from financial_workbench.documents import page_windows, read_pdf
+from financial_workbench.documents import batch_windows, page_windows, read_pdf, select_extraction_windows
 from financial_workbench.engine import (
     CATALOG,
     METRICS,
@@ -35,7 +35,7 @@ def page():
         "file": "annual.pdf",
         "sha256": "a" * 64,
         "page": 1,
-        "text": "Example SA. Consolidated. Annual 2025. EUR thousands.\nRevenue 1,234.5\nCost of sales (234.5)",
+        "text": "Example SA. Consolidated. Annual 2025. EUR thousands. Statement of Profit or Loss.\nRevenue 1,234.5\nCost of sales (234.5)",
         "tables": "",
     }
 
@@ -52,6 +52,7 @@ def fact(**overrides):
                 "raw_value": "1,234.5",
                 "decimal_separator": ".",
                 "scale": 1000,
+                "source_file": "annual.pdf",
                 "page": 1,
                 "quote": "Revenue 1,234.5",
                 "context_quote": "Annual 2025. EUR thousands.",
@@ -111,6 +112,7 @@ def test_grounding_and_scale(settings, page):
         {"year": 2018},
         {"company": "Other SA"},
         {"page": 2},
+        {"source_file": "another.pdf"},
         {"metric_id": "market_inputs_18"},
         {"raw_value": "234.5"},
     ],
@@ -124,7 +126,7 @@ def test_conflicts_dedup_and_rejection(settings, page):
     other = {**page, "page": 2, "text": page["text"].replace("1,234.5", "2,234.5")}
 
     async def fake(messages, structured=False):
-        n = json.loads(messages[1]["content"])["pdf_page"]
+        n = json.loads(messages[1]["content"])["pdf_chunks"][0]["page"]
         f = fact(
             page=n,
             raw_value="1,234.5" if n == 1 else "2,234.5",
@@ -147,7 +149,7 @@ def test_conflicts_dedup_and_rejection(settings, page):
         )
     )
     assert len(candidates) == 2 and all(c["status"] == "conflict" for c in candidates)
-    assert len(rejected) == 2 and progress[-1] == (2, 2)
+    assert len(rejected) == 2 and progress[-1] == (1, 1)
 
 
 def test_pdf_and_page_chunks(tmp_path):
@@ -155,14 +157,14 @@ def test_pdf_and_page_chunks(tmp_path):
     d = pymupdf.open()
     d.new_page().insert_text(
         (40, 60),
-        "Example SA annual consolidated report 2025. EUR thousands. Revenue 100.",
+        "Example SA annual consolidated report 2025. EUR thousands. Statement of Profit or Loss. Revenue 100.",
     )
     d.save(p)
     d.close()
     pages, _warnings = read_pdf(p, "report.pdf")
     assert pages[0]["page"] == 1 and "Revenue 100" in pages[0]["text"]
     windows = list(page_windows([{**pages[0], "text": "x" * 35000}]))
-    assert len(windows) == 3 and all(p["page"] == 1 for p, _ in windows)
+    assert len(windows) == 6 and all(p["page"] == 1 for p, _ in windows)
     blank = tmp_path / "scan.pdf"
     d = pymupdf.open()
     d.new_page()
@@ -170,6 +172,22 @@ def test_pdf_and_page_chunks(tmp_path):
     d.close()
     with pytest.raises(ValueError, match="OCR"):
         read_pdf(blank, "scan.pdf")
+
+
+def test_large_pdf_chunks_are_bounded_and_batched():
+    pages = [
+        {"id": i, "file": "large.pdf", "sha256": "a" * 64, "page": i + 1,
+         "text": ("Statement of Financial Position Total assets Revenue " if i in (20, 120) else "Narrative page ") + "1,234 " * 2500,
+         "tables": ""}
+        for i in range(180)
+    ]
+    windows = list(page_windows(pages))
+    selected = select_extraction_windows(windows, max_chunks=12)
+    batches = batch_windows(selected)
+    assert len(windows) > 180
+    assert len(selected) == 12
+    assert {21, 121}.issubset({page["page"] for page, _ in selected})
+    assert all(len(batch) <= 4 and sum(len(chunk) for _, chunk in batch) <= 24_000 for batch in batches)
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])
@@ -243,7 +261,7 @@ def client(tmp_path, monkeypatch):
 def upload(client, settings):
     d = pymupdf.open()
     d.new_page().insert_text(
-        (40, 60), "Example SA annual consolidated report 2025 EUR thousands Revenue 100"
+        (40, 60), "Example SA annual consolidated report 2025 EUR thousands Statement of Profit or Loss Revenue 100"
     )
     pdf = d.tobytes()
     d.close()
@@ -358,7 +376,7 @@ def test_worker_pdf_to_ready_without_network(tmp_path, monkeypatch, settings):
 
     async def fake_complete(messages, structured=False):
         body = json.loads(messages[1]["content"])
-        assert "Revenue 100" in body["untrusted_content"]
+        assert "Revenue 100" in body["pdf_chunks"][0]["content"]
         return json.dumps(
             {
                 "facts": [

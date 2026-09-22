@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
-from .documents import read_pdf
+from .documents import extraction_plan, read_pdf
 from .engine import CATALOG, METRICS, extract, reconcile
 from .llm import ProviderError, completion
 from .models import Question, Review, Settings
@@ -53,6 +53,13 @@ async def worker(app):
                 )
             job["pages"] = pages
             job["warnings"] = warnings
+            all_chunks, candidate_chunks, batches = extraction_plan(pages)
+            job["warnings"].append(
+                f"The PDF produced {len(all_chunks)} page-aware chunks. "
+                f"The extractor selected {len(candidate_chunks)} financially relevant chunks in "
+                f"{len(batches)} bounded provider batches; all {len(pages)} pages remain available for questions."
+            )
+            job["progress"] = {"done": 0, "total": len(batches)}
             app.state.store.put(job)
 
             def progress(done, total, job=job):

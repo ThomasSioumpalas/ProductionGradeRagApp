@@ -47,7 +47,7 @@ Use **one API worker**. The persistent queue and SQLite database are designed fo
 
 1. Select English or Greek. Enter the company name as it appears in the annual report, latest fiscal year, reporting scope, currency and output scales.
 2. Upload annual PDFs for one company and matching reporting scope. Up to 10 PDFs, 40 MB each, 100 MB total, 600 pages per PDF and 1,000 pages per set are supported.
-3. Wait for extraction. Every page is processed; this can take several minutes and consumes Groq tokens. Scanned/image-only documents need OCR first. Mixed documents produce notices for pages with little readable text.
+3. Wait for extraction. The service splits every PDF page into overlapping, page-aware chunks. It ranks financial chunks, selects a bounded and diverse set for structured extraction, then sends those chunks in small provider batches. All pages stay available for source viewing and questions. The counter shows provider batches, so it advances steadily even for a large report. Scanned/image-only documents need OCR first.
 4. Review candidates. Inspect the raw quote, year/scope/unit context and original PDF. A citation proves where the text occurs; it does **not** prove that the model chose the right year or financial concept. The review step is required for that reason.
 5. Select one candidate for each metric/year, leave it blank, or enter a manual value with a source/assumption note. Bulk selection only selects metrics with a single distinct value; conflicts require an explicit selection. Restatements are not silently preferred over earlier reports.
 6. Save the review. Inspect reconciliation differences and missing-data notices. A mismatch is visible but does not prevent exporting a workbook for further analysis.
@@ -67,7 +67,7 @@ No FX conversion or consolidation is performed. Currency and scope mismatches ar
 
 ## How the code connects
 
-- `documents.py` reads sorted page text and detected tables with PyMuPDF. Chunk windows retain the PDF page identity and overlap on large pages. No top-k retrieval cutoff is used for workbook extraction.
+- `documents.py` reads sorted page text with PyMuPDF, then makes overlapping chunks that retain their original PDF page. It ranks financial terms and numeric density, chooses a configurable maximum of 48 diverse chunks, and groups them into requests of at most four chunks or 24,000 characters. It does not run expensive geometric table detection on every page.
 - `llm.py` calls Groq using strict JSON-schema output, bounded retries and a configurable supported model. The default is `openai/gpt-oss-120b`. Incomplete or refused responses are rejected.
 - `models.py` validates extraction and review payloads. Structured output ensures shape, not factual accuracy.
 - `engine.py` maps claims to the catalog, verifies verbatim excerpts and numeric tokens, parses English/Greek numeric separators using `Decimal`, normalizes units and the template's expense signs, and exposes conflicts. It also performs selected independent reconciliation checks.

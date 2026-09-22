@@ -85,7 +85,7 @@ export const copy = {
     required: "Enter the company name and choose at least one PDF.",
     pending: "Unsaved changes: save your review before downloading.",
     progressHelp:
-      "Every page is checked. Large reports may take several minutes. You can return to this analysis later.",
+      "The report is being split into page-aware financial chunks and processed in small batches. You can return to this analysis later.",
     checkNames: [
       "Assets = liabilities + equity",
       "Assets = current + non-current",
@@ -180,7 +180,7 @@ export const copy = {
     required: "Συμπληρώστε επωνυμία και επιλέξτε τουλάχιστον ένα PDF.",
     pending: "Μη αποθηκευμένες αλλαγές: αποθηκεύστε τον έλεγχο πριν τη λήψη.",
     progressHelp:
-      "Ελέγχεται κάθε σελίδα. Οι μεγάλες εκθέσεις μπορεί να χρειαστούν αρκετά λεπτά. Μπορείτε να επιστρέψετε αργότερα.",
+      "Η έκθεση χωρίζεται σε οικονομικά τμήματα με αναφορά στη σελίδα και επεξεργάζεται σε μικρές παρτίδες. Μπορείτε να επιστρέψετε αργότερα.",
     checkNames: [
       "Ενεργητικό = υποχρεώσεις + ίδια κεφάλαια",
       "Ενεργητικό = κυκλοφορούν + μη κυκλοφορούν",

@@ -20,7 +20,9 @@ async def completion(messages, structured=False):
         "model": os.getenv("GROQ_EXTRACTION_MODEL", "openai/gpt-oss-120b"),
         "messages": messages,
         "temperature": 0,
-        "max_completion_tokens": 16000 if structured else 3000,
+        # Primary statement pages need a bounded list of figures, not a long
+        # report. Keeping this small avoids multi-minute generation stalls.
+        "max_completion_tokens": 6000 if structured else 3000,
     }
     if structured:
         body["response_format"] = {
@@ -31,8 +33,8 @@ async def completion(messages, structured=False):
                 "schema": Extraction.model_json_schema(),
             },
         }
-    async with httpx.AsyncClient(timeout=120) as client:
-        for attempt in range(4):
+    async with httpx.AsyncClient(timeout=60) as client:
+        for attempt in range(2):
             try:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -40,7 +42,7 @@ async def completion(messages, structured=False):
                     json=body,
                 )
             except httpx.TransportError as exc:
-                if attempt == 3:
+                if attempt == 1:
                     raise ProviderError(
                         "The model provider could not be reached. Retry the job."
                     ) from exc
@@ -48,7 +50,7 @@ async def completion(messages, structured=False):
                 continue
             if (
                 response.status_code == 429 or response.status_code >= 500
-            ) and attempt < 3:
+            ) and attempt < 1:
                 try:
                     delay = min(
                         30,

@@ -4,7 +4,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .documents import page_windows
+from .documents import extraction_plan
 from .llm import completion
 from .models import Extraction, Settings
 
@@ -46,8 +46,8 @@ def validate_fact(fact, page, settings):
         or fact.scope != settings.scope
     ):
         raise ValueError("Company or reporting scope mismatch")
-    if fact.page != page["page"]:
-        raise ValueError("Page mismatch")
+    if fact.source_file != page["file"] or fact.page != page["page"]:
+        raise ValueError("Source file or page mismatch")
     source = normalise(page["text"] + " " + page["tables"])
     if len(fact.quote.strip()) < 6 or normalise(fact.quote) not in source:
         raise ValueError("Source quote is not present on the page")
@@ -112,15 +112,18 @@ Keep consolidated and parent-company columns distinct. Only full annual flows an
 Use the year printed in the column, not publication year. Extract all annual comparative years within the requested window.
 raw_value must copy the printed numeric token exactly (parentheses included); declare its decimal separator and source scale.
 Currency is ISO 4217 (EUR/USD etc); scale is 1/1000/1000000. Shares have their own scale; per-share numbers are scale 1.
-quote must be an exact contiguous excerpt including the financial line and raw number. context_quote must be an exact contiguous excerpt
-from this page evidencing the column year, scope or unit. Do not join separate passages. Omit ambiguous facts.
+source_file must exactly match the filename supplied for the chunk and page must be from that same file. quote must be an exact contiguous
+excerpt including the financial line and raw number. context_quote must be an exact contiguous excerpt from that page evidencing the
+column year, scope or unit. Do not join separate passages. Omit ambiguous facts.
 Do not map combined trade-and-other receivables/payables to trade-only lines. Avoid overlapping component assignments.
 Keep reported signs; the exporter handles positive income-statement expense conventions. Do not flip signed cash flows.
 Only reported figures, including stated EPS and market data. Output an empty facts array on irrelevant pages.
 """
     candidates, rejected = [], []
-    windows = list(page_windows(pages))
-    for i, (page, content) in enumerate(windows):
+    _windows, _selected, batches = extraction_plan(pages)
+    pages_by_source = {(page["file"], page["page"]): page for page in pages}
+    progress(0, len(batches))
+    for i, batch in enumerate(batches):
         result = await complete(
             [
                 {"role": "system", "content": system},
@@ -130,9 +133,14 @@ Only reported figures, including stated EPS and market data. Output an empty fac
                         {
                             "settings": settings.model_dump(),
                             "metrics": catalog,
-                            "pdf_page": page["page"],
-                            "filename": page["file"],
-                            "untrusted_content": content,
+                            "pdf_chunks": [
+                                {
+                                    "page": page["page"],
+                                    "filename": page["file"],
+                                    "content": content,
+                                }
+                                for page, content in batch
+                            ],
                         },
                         ensure_ascii=False,
                     ),
@@ -143,6 +151,9 @@ Only reported figures, including stated EPS and market data. Output an empty fac
         facts = Extraction.model_validate_json(result).facts
         for fact in facts:
             try:
+                page = pages_by_source.get((fact.source_file, fact.page))
+                if page is None:
+                    raise ValueError("Source file and page are not part of the uploaded PDFs")
                 candidate = validate_fact(fact, page, settings)
                 key = (
                     candidate["metric_id"],
@@ -160,13 +171,13 @@ Only reported figures, including stated EPS and market data. Output an empty fac
             except ValueError as exc:
                 rejected.append(
                     {
-                        "file": page["file"],
-                        "page": page["page"],
+                        "file": getattr(fact, "source_file", "unknown"),
+                        "page": fact.page,
                         "metric_id": fact.metric_id,
                         "reason": str(exc),
                     }
                 )
-        progress(i + 1, len(windows))
+        progress(i + 1, len(batches))
     for c in candidates:
         if (
             len(
