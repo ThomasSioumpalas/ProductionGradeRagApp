@@ -33,6 +33,7 @@ async def completion(messages, structured=False):
                 "schema": Extraction.model_json_schema(),
             },
         }
+    used_json_mode_fallback = False
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(5):
             try:
@@ -61,6 +62,19 @@ async def completion(messages, structured=False):
                 await asyncio.sleep(delay)
                 continue
             if response.is_error:
+                # Some otherwise-supported open-weight models occasionally fail
+                # Groq's server-side strict-schema generation. JSON mode keeps
+                # the response bounded; Extraction.model_validate_json still
+                # performs the same local schema validation before facts are used.
+                if (
+                    structured
+                    and response.status_code == 400
+                    and "json_validate_failed" in response.text
+                    and not used_json_mode_fallback
+                ):
+                    body["response_format"] = {"type": "json_object"}
+                    used_json_mode_fallback = True
+                    continue
                 # Return the provider's compact diagnostic. It distinguishes a
                 # request-size limit from key, model-access, or quota problems.
                 detail = response.text.replace("\n", " ").strip()[:500]

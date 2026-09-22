@@ -143,6 +143,8 @@ column year, scope or unit. Do not join separate passages. Omit ambiguous facts.
 Do not map combined trade-and-other receivables/payables to trade-only lines. Avoid overlapping component assignments.
 Keep reported signs; the exporter handles positive income-statement expense conventions. Do not flip signed cash flows.
 Only reported figures, including stated EPS and market data. Output an empty facts array on irrelevant pages.
+Return a JSON object with exactly one key, facts. Each fact must include metric_id, year, company, scope, currency, raw_value,
+decimal_separator, scale, source_file, page, quote and context_quote. Do not include markdown or any extra keys.
 """
     candidates, rejected = [], []
     _windows, _selected, batches = extraction_plan(pages)
