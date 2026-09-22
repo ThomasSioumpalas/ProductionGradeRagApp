@@ -22,7 +22,7 @@ async def completion(messages, structured=False):
         "temperature": 0,
         # Primary statement pages need a bounded list of figures, not a long
         # report. Keeping this small avoids multi-minute generation stalls.
-        "max_completion_tokens": 800 if structured else 3000,
+        "max_completion_tokens": 1200 if structured else 3000,
     }
     if structured:
         body["response_format"] = {
@@ -86,8 +86,16 @@ async def completion(messages, structured=False):
             if choice.get("finish_reason") != "stop" or not choice["message"].get(
                 "content"
             ):
+                payload = response.json()
+                usage = payload.get("usage", {})
+                reason = choice.get("finish_reason", "unknown")
+                refusal = choice.get("message", {}).get("refusal")
                 raise ProviderError(
-                    "Model output was incomplete or refused. No partial extraction was accepted."
+                    "Model output was incomplete or refused: "
+                    f"finish_reason={reason}, "
+                    f"completion_tokens={usage.get('completion_tokens', 'unknown')}, "
+                    f"refusal={str(refusal)[:160] if refusal else 'none'}. "
+                    "No partial extraction was accepted."
                 )
             return choice["message"]["content"]
     raise ProviderError(
