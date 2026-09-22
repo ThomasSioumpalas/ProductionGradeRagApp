@@ -100,7 +100,6 @@ async def extract(pages, settings: Settings, progress, complete=completion):
             "id": m["id"],
             "label": m["label"],
             "unit": m["unit"],
-            "guidance": m["guidance"],
         }
         for m in CATALOG
         if m["automatic"]

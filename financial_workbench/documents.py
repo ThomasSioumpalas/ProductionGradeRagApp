@@ -7,11 +7,13 @@ from pathlib import Path
 import pymupdf
 
 MAX_PAGES = 600
-DEFAULT_CHUNK_CHARS = 7_000
-DEFAULT_CHUNK_OVERLAP = 700
-DEFAULT_MAX_EXTRACTION_CHUNKS = 48
-DEFAULT_BATCH_CHARS = 24_000
-DEFAULT_BATCH_CHUNKS = 4
+# Groq rejects a complete prompt (input plus allowed output) that exceeds the
+# selected model's request limit. Keep one small source chunk per request.
+DEFAULT_CHUNK_CHARS = 2_500
+DEFAULT_CHUNK_OVERLAP = 250
+DEFAULT_MAX_EXTRACTION_CHUNKS = 36
+DEFAULT_BATCH_CHARS = 2_500
+DEFAULT_BATCH_CHUNKS = 1
 
 FINANCIAL_TERMS = (
     "statement of profit or loss", "statement of comprehensive income",

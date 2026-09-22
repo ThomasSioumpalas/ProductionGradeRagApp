@@ -22,7 +22,7 @@ async def completion(messages, structured=False):
         "temperature": 0,
         # Primary statement pages need a bounded list of figures, not a long
         # report. Keeping this small avoids multi-minute generation stalls.
-        "max_completion_tokens": 6000 if structured else 3000,
+        "max_completion_tokens": 2000 if structured else 3000,
     }
     if structured:
         body["response_format"] = {
@@ -61,8 +61,11 @@ async def completion(messages, structured=False):
                 await asyncio.sleep(delay)
                 continue
             if response.is_error:
+                # Return the provider's compact diagnostic. It distinguishes a
+                # request-size limit from key, model-access, or quota problems.
+                detail = response.text.replace("\n", " ").strip()[:500]
                 raise ProviderError(
-                    f"Model provider returned HTTP {response.status_code}. Check the key, model access and quota."
+                    f"Model provider returned HTTP {response.status_code}: {detail or 'no detail returned'}"
                 )
             choice = response.json()["choices"][0]
             if choice.get("finish_reason") != "stop" or not choice["message"].get(

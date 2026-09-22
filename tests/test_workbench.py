@@ -149,7 +149,7 @@ def test_conflicts_dedup_and_rejection(settings, page):
         )
     )
     assert len(candidates) == 2 and all(c["status"] == "conflict" for c in candidates)
-    assert len(rejected) == 2 and progress[-1] == (1, 1)
+    assert len(rejected) == 2 and progress[-1] == (2, 2)
 
 
 def test_pdf_and_page_chunks(tmp_path):
@@ -164,7 +164,7 @@ def test_pdf_and_page_chunks(tmp_path):
     pages, _warnings = read_pdf(p, "report.pdf")
     assert pages[0]["page"] == 1 and "Revenue 100" in pages[0]["text"]
     windows = list(page_windows([{**pages[0], "text": "x" * 35000}]))
-    assert len(windows) == 6 and all(p["page"] == 1 for p, _ in windows)
+    assert len(windows) == 16 and all(p["page"] == 1 for p, _ in windows)
     blank = tmp_path / "scan.pdf"
     d = pymupdf.open()
     d.new_page()
@@ -187,7 +187,7 @@ def test_large_pdf_chunks_are_bounded_and_batched():
     assert len(windows) > 180
     assert len(selected) == 12
     assert {21, 121}.issubset({page["page"] for page, _ in selected})
-    assert all(len(batch) <= 4 and sum(len(chunk) for _, chunk in batch) <= 24_000 for batch in batches)
+    assert all(len(batch) <= 1 and sum(len(chunk) for _, chunk in batch) <= 2_500 for batch in batches)
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])
