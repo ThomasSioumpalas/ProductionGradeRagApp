@@ -22,7 +22,7 @@ async def completion(messages, structured=False):
         "temperature": 0,
         # Primary statement pages need a bounded list of figures, not a long
         # report. Keeping this small avoids multi-minute generation stalls.
-        "max_completion_tokens": 2000 if structured else 3000,
+        "max_completion_tokens": 800 if structured else 3000,
     }
     if structured:
         body["response_format"] = {
@@ -34,7 +34,7 @@ async def completion(messages, structured=False):
             },
         }
     async with httpx.AsyncClient(timeout=60) as client:
-        for attempt in range(2):
+        for attempt in range(5):
             try:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -42,7 +42,7 @@ async def completion(messages, structured=False):
                     json=body,
                 )
             except httpx.TransportError as exc:
-                if attempt == 1:
+                if attempt == 4:
                     raise ProviderError(
                         "The model provider could not be reached. Retry the job."
                     ) from exc
@@ -50,7 +50,7 @@ async def completion(messages, structured=False):
                 continue
             if (
                 response.status_code == 429 or response.status_code >= 500
-            ) and attempt < 1:
+            ) and attempt < 4:
                 try:
                     delay = min(
                         30,

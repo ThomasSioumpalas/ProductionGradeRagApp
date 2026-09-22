@@ -67,7 +67,7 @@ No FX conversion or consolidation is performed. Currency and scope mismatches ar
 
 ## How the code connects
 
-- `documents.py` reads sorted page text with PyMuPDF, then makes overlapping chunks that retain their original PDF page. It ranks financial terms and numeric density, chooses a configurable maximum of 36 diverse chunks, and sends one 2,500-character chunk per bounded request. It does not run expensive geometric table detection on every page.
+- `documents.py` reads sorted page text with PyMuPDF, then makes overlapping chunks that retain their original PDF page. It ranks financial terms and numeric density, chooses a configurable maximum of 24 diverse chunks, and sends one 2,500-character chunk per bounded request. It does not run expensive geometric table detection on every page. The extraction engine also routes only relevant workbook metric IDs into each request to stay within provider token limits.
 - `llm.py` calls Groq using strict JSON-schema output, bounded retries and a configurable supported model. The default is `openai/gpt-oss-120b`. Incomplete or refused responses are rejected.
 - `models.py` validates extraction and review payloads. Structured output ensures shape, not factual accuracy.
 - `engine.py` maps claims to the catalog, verifies verbatim excerpts and numeric tokens, parses English/Greek numeric separators using `Decimal`, normalizes units and the template's expense signs, and exposes conflicts. It also performs selected independent reconciliation checks.

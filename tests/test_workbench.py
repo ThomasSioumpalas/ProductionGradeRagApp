@@ -18,6 +18,7 @@ from financial_workbench.engine import (
     parse_number,
     reconcile,
     validate_fact,
+    metrics_for_chunk,
 )
 from financial_workbench.models import ExtractedFact, Settings
 from financial_workbench.workbook import export_workbook
@@ -188,6 +189,13 @@ def test_large_pdf_chunks_are_bounded_and_batched():
     assert len(selected) == 12
     assert {21, 121}.issubset({page["page"] for page, _ in selected})
     assert all(len(batch) <= 1 and sum(len(chunk) for _, chunk in batch) <= 2_500 for batch in batches)
+
+
+def test_metric_routing_keeps_statement_requests_small():
+    metrics = metrics_for_chunk("Statement of Financial Position Total assets cash and cash equivalents")
+    assert 1 <= len(metrics) <= 36
+    assert all(m["id"].startswith("balance_sheet_") for m in metrics)
+    assert {"id", "label", "unit"} == set(metrics[0])
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])
