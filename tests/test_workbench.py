@@ -15,6 +15,7 @@ from financial_workbench.engine import (
     CATALOG,
     METRICS,
     extract,
+    extraction_tasks,
     parse_number,
     reconcile,
     validate_fact,
@@ -126,7 +127,10 @@ def test_conflicts_dedup_and_rejection(settings, page):
     other = {**page, "page": 2, "text": page["text"].replace("1,234.5", "2,234.5")}
 
     async def fake(messages, structured=False):
-        n = json.loads(messages[1]["content"])["pdf_chunks"][0]["page"]
+        body = json.loads(messages[1]["content"])
+        if "income_statement_8" not in {m["id"] for m in body["metrics"]}:
+            return json.dumps({"facts": []})
+        n = body["pdf_chunks"][0]["page"]
         f = fact(
             page=n,
             raw_value="1,234.5" if n == 1 else "2,234.5",
@@ -195,6 +199,8 @@ def test_metric_routing_keeps_statement_requests_small():
     assert 1 <= len(metrics) <= 36
     assert all(m["id"].startswith("balance_sheet_") for m in metrics)
     assert {"id", "label", "unit"} == set(metrics[0])
+    tasks = extraction_tasks([[({"page": 1}, "Statement of Financial Position")]])
+    assert tasks and all(len(task_metrics) <= 4 for _, task_metrics in tasks)
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])

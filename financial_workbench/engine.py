@@ -10,6 +10,7 @@ from .models import Extraction, Settings
 
 CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text())
 METRICS = {m["id"]: m for m in CATALOG}
+MAX_METRICS_PER_REQUEST = 4
 
 
 def metrics_for_chunk(content: str):
@@ -45,6 +46,16 @@ def metrics_for_chunk(content: str):
         {"id": m["id"], "label": m["label"]["en"], "unit": m["unit"]}
         for m in ranked[:limit]
     ]
+
+
+def extraction_tasks(batches):
+    """Split source chunks by metric group so JSON responses stay bounded."""
+    tasks = []
+    for batch in batches:
+        metrics = metrics_for_chunk(batch[0][1])
+        for start in range(0, len(metrics), MAX_METRICS_PER_REQUEST):
+            tasks.append((batch, metrics[start:start + MAX_METRICS_PER_REQUEST]))
+    return tasks
 
 
 def normalise(text):
@@ -146,9 +157,10 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
 """
     candidates, rejected = [], []
     _windows, _selected, batches = extraction_plan(pages)
+    tasks = extraction_tasks(batches)
     pages_by_source = {(page["file"], page["page"]): page for page in pages}
-    progress(0, len(batches))
-    for i, batch in enumerate(batches):
+    progress(0, len(tasks))
+    for i, (batch, task_metrics) in enumerate(tasks):
         result = await complete(
             [
                 {"role": "system", "content": system},
@@ -157,7 +169,7 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
                     "content": json.dumps(
                         {
                             "settings": settings.model_dump(),
-                            "metrics": metrics_for_chunk(batch[0][1]),
+                            "metrics": task_metrics,
                             "pdf_chunks": [
                                 {
                                     "page": page["page"],
@@ -174,8 +186,11 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
             structured=True,
         )
         facts = Extraction.model_validate_json(result).facts
+        allowed_metric_ids = {metric["id"] for metric in task_metrics}
         for fact in facts:
             try:
+                if fact.metric_id not in allowed_metric_ids:
+                    raise ValueError("Metric was not offered in this extraction task")
                 page = pages_by_source.get((fact.source_file, fact.page))
                 if page is None:
                     raise ValueError("Source file and page are not part of the uploaded PDFs")
@@ -202,7 +217,7 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
                         "reason": str(exc),
                     }
                 )
-        progress(i + 1, len(batches))
+        progress(i + 1, len(tasks))
     for c in candidates:
         if (
             len(
