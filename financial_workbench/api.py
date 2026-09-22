@@ -58,7 +58,8 @@ async def worker(app):
             job["warnings"].append(
                 f"The PDF produced {len(all_chunks)} page-aware chunks. "
                 f"The extractor selected {len(candidate_chunks)} financially relevant chunks in "
-                f"{len(provider_tasks)} bounded metric-group requests; all {len(pages)} pages remain available for questions."
+                f"starting with {len(provider_tasks)} bounded metric-group requests. Oversized outputs split into smaller requests automatically; "
+                f"all {len(pages)} pages remain available for questions."
             )
             job["progress"] = {"done": 0, "total": len(provider_tasks)}
             app.state.store.put(job)

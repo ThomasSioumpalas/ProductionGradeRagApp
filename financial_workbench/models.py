@@ -24,17 +24,17 @@ class ExtractedFact(StrictModel):
     scope: Literal["consolidated", "standalone"]
     currency: str
     # Raw number and explicit separator make conversion deterministic, not LLM arithmetic.
-    raw_value: str
+    raw_value: str = Field(min_length=1, max_length=60)
     decimal_separator: Literal[".", ","]
     scale: Literal[1, 1000, 1000000]
     source_file: str = Field(min_length=1, max_length=200)
     page: int
-    quote: str
-    context_quote: str
+    quote: str = Field(min_length=6, max_length=240)
+    context_quote: str = Field(min_length=1, max_length=180)
 
 
 class Extraction(StrictModel):
-    facts: list[ExtractedFact]
+    facts: list[ExtractedFact] = Field(max_length=8)
 
 
 class Decision(StrictModel):

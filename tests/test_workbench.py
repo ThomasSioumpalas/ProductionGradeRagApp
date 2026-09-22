@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from financial_workbench.api import create_app
 from financial_workbench.documents import batch_windows, page_windows, read_pdf, select_extraction_windows
+import financial_workbench.engine as engine_module
 from financial_workbench.engine import (
     CATALOG,
     METRICS,
@@ -123,7 +124,12 @@ def test_reject_unsupported_claim(settings, page, change):
         validate_fact(fact(**change), page, settings)
 
 
-def test_conflicts_dedup_and_rejection(settings, page):
+def test_conflicts_dedup_and_rejection(settings, page, monkeypatch):
+    monkeypatch.setattr(
+        engine_module,
+        "metrics_for_chunk",
+        lambda _content: [{"id": "income_statement_8", "label": "Revenue", "unit": "money"}],
+    )
     other = {**page, "page": 2, "text": page["text"].replace("1,234.5", "2,234.5")}
 
     async def fake(messages, structured=False):
@@ -154,6 +160,34 @@ def test_conflicts_dedup_and_rejection(settings, page):
     )
     assert len(candidates) == 2 and all(c["status"] == "conflict" for c in candidates)
     assert len(rejected) == 2 and progress[-1] == (2, 2)
+
+
+def test_incomplete_group_is_split_and_retried(settings, page, monkeypatch):
+    from financial_workbench.llm import IncompleteOutputError
+
+    monkeypatch.setattr(
+        engine_module,
+        "metrics_for_chunk",
+        lambda _content: [
+            {"id": "income_statement_8", "label": "Revenue", "unit": "money"},
+            {"id": "income_statement_9", "label": "Cost of sales", "unit": "money"},
+        ],
+    )
+    calls, progress = [], []
+
+    async def fake(_messages, structured=False):
+        calls.append(_messages)
+        body = json.loads(_messages[1]["content"])
+        if len(body["metrics"]) > 1:
+            raise IncompleteOutputError("length", "test output limit")
+        return json.dumps({"facts": []})
+
+    candidates, rejected = asyncio.run(
+        extract(pages=[page], settings=settings, progress=lambda a, b: progress.append((a, b)), complete=fake)
+    )
+    assert candidates == [] and rejected == []
+    assert len(calls) == 3
+    assert progress[-1] == (2, 2)
 
 
 def test_pdf_and_page_chunks(tmp_path):

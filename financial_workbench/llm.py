@@ -10,6 +10,12 @@ class ProviderError(RuntimeError):
     pass
 
 
+class IncompleteOutputError(ProviderError):
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = reason
+
+
 async def completion(messages, structured=False):
     key = os.getenv("GROQ_API_KEY")
     if not key:
@@ -96,7 +102,8 @@ async def completion(messages, structured=False):
                 usage = payload.get("usage", {})
                 reason = choice.get("finish_reason", "unknown")
                 refusal = choice.get("message", {}).get("refusal")
-                raise ProviderError(
+                raise IncompleteOutputError(
+                    reason,
                     "Model output was incomplete or refused: "
                     f"finish_reason={reason}, "
                     f"completion_tokens={usage.get('completion_tokens', 'unknown')}, "

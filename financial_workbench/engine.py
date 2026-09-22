@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .documents import extraction_plan
-from .llm import completion
+from .llm import IncompleteOutputError, completion
 from .models import Extraction, Settings
 
 CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text())
@@ -146,9 +146,9 @@ Keep consolidated and parent-company columns distinct. Only full annual flows an
 Use the year printed in the column, not publication year. Extract all annual comparative years within the requested window.
 raw_value must copy the printed numeric token exactly (parentheses included); declare its decimal separator and source scale.
 Currency is ISO 4217 (EUR/USD etc); scale is 1/1000/1000000. Shares have their own scale; per-share numbers are scale 1.
-source_file must exactly match the filename supplied for the chunk and page must be from that same file. quote must be an exact contiguous
-excerpt including the financial line and raw number. context_quote must be an exact contiguous excerpt from that page evidencing the
-column year, scope or unit. Do not join separate passages. Omit ambiguous facts.
+source_file must exactly match the filename supplied for the chunk and page must be from that same file. Keep quote concise: the shortest
+exact excerpt containing the financial line and raw number. context_quote must be the shortest exact excerpt evidencing year, scope or unit.
+Do not join separate passages. Return at most 8 facts, one per metric and year. Omit ambiguous facts.
 Do not map combined trade-and-other receivables/payables to trade-only lines. Avoid overlapping component assignments.
 Keep reported signs; the exporter handles positive income-statement expense conventions. Do not flip signed cash flows.
 Only reported figures, including stated EPS and market data. Output an empty facts array on irrelevant pages.
@@ -160,31 +160,48 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
     tasks = extraction_tasks(batches)
     pages_by_source = {(page["file"], page["page"]): page for page in pages}
     progress(0, len(tasks))
-    for i, (batch, task_metrics) in enumerate(tasks):
-        result = await complete(
-            [
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "settings": settings.model_dump(),
-                            "metrics": task_metrics,
-                            "pdf_chunks": [
-                                {
-                                    "page": page["page"],
-                                    "filename": page["file"],
-                                    "content": content,
-                                }
-                                for page, content in batch
-                            ],
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            structured=True,
-        )
+    completed = 0
+    task_index = 0
+    while task_index < len(tasks):
+        batch, task_metrics = tasks[task_index]
+        messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "settings": settings.model_dump(),
+                        "metrics": task_metrics,
+                        "pdf_chunks": [
+                            {
+                                "page": page["page"],
+                                "filename": page["file"],
+                                "content": content,
+                            }
+                            for page, content in batch
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        try:
+            result = await complete(messages, structured=True)
+        except IncompleteOutputError as exc:
+            # Dense statement chunks can still exceed the completion cap. Retry
+            # only that source chunk with half as many metric choices, rather
+            # than failing the entire multi-page job or raising the global token
+            # reservation for every request.
+            if exc.reason == "length" and len(task_metrics) > 1:
+                midpoint = len(task_metrics) // 2
+                smaller = [
+                    (batch, task_metrics[:midpoint]),
+                    (batch, task_metrics[midpoint:]),
+                ]
+                tasks[task_index:task_index + 1] = smaller
+                progress(completed, len(tasks))
+                continue
+            raise
         facts = Extraction.model_validate_json(result).facts
         allowed_metric_ids = {metric["id"] for metric in task_metrics}
         for fact in facts:
@@ -217,7 +234,9 @@ decimal_separator, scale, source_file, page, quote and context_quote. Do not inc
                         "reason": str(exc),
                     }
                 )
-        progress(i + 1, len(tasks))
+        completed += 1
+        task_index += 1
+        progress(completed, len(tasks))
     for c in candidates:
         if (
             len(
