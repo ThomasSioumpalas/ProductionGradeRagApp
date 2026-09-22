@@ -63,16 +63,17 @@ async def completion(messages, structured=False):
                 continue
             if response.is_error:
                 # Some otherwise-supported open-weight models occasionally fail
-                # Groq's server-side strict-schema generation. JSON mode keeps
-                # the response bounded; Extraction.model_validate_json still
-                # performs the same local schema validation before facts are used.
+                # Groq's server-side generation validator. Retry without any
+                # provider response format; Extraction.model_validate_json still
+                # performs the complete local schema validation before facts are
+                # used, so malformed output is never accepted.
                 if (
                     structured
                     and response.status_code == 400
                     and "json_validate_failed" in response.text
                     and not used_json_mode_fallback
                 ):
-                    body["response_format"] = {"type": "json_object"}
+                    body.pop("response_format", None)
                     used_json_mode_fallback = True
                     continue
                 # Return the provider's compact diagnostic. It distinguishes a
