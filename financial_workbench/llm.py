@@ -22,9 +22,15 @@ async def completion(messages, structured=False):
         "temperature": 0,
         # Primary statement pages need a bounded list of figures, not a long
         # report. Keeping this small avoids multi-minute generation stalls.
-        "max_completion_tokens": 1200 if structured else 3000,
+        "max_completion_tokens": 1600 if structured else 3000,
     }
     if structured:
+        # GPT-OSS defaults to medium reasoning, which can consume the entire
+        # completion budget before producing the JSON payload. Extraction is a
+        # constrained mapping task, so low effort is both sufficient and safer
+        # for Groq's small on-demand TPM allowance.
+        body["reasoning_effort"] = "low"
+        body["include_reasoning"] = False
         body["response_format"] = {
             "type": "json_schema",
             "json_schema": {
