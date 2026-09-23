@@ -17,12 +17,17 @@ class IncompleteOutputError(ProviderError):
         self.reason = reason
 
 
+MAX_PROVIDER_ATTEMPTS = 8
+
+
 def retry_delay(response, attempt):
     """Honor Groq's retry window, including longer daily-token resets."""
     header = response.headers.get("retry-after")
     if header:
         try:
-            return min(86_400, max(1, float(header)))
+            # Provider windows can be approximate; leave a small margin so a
+            # retry does not arrive just before the reported quota clears.
+            return min(86_400, max(1, float(header)) + 1)
         except ValueError:
             pass
 
@@ -30,7 +35,9 @@ def retry_delay(response, attempt):
         message = response.json().get("error", {}).get("message", "")
     except (ValueError, AttributeError):
         message = ""
-    match = re.search(r"try again in\s+((?:\d+(?:\.\d+)?\s*[hms]\s*)+)", message, re.I)
+    match = re.search(
+        r"try again in\s+((?:\d+(?:\.\d+)?\s*[hms]\s*)+)", message, re.I
+    )
     if match:
         parts = re.findall(r"(\d+(?:\.\d+)?)\s*([hms])", match.group(1), re.I)
         seconds = sum(
@@ -38,7 +45,7 @@ def retry_delay(response, attempt):
             for value, unit in parts
         )
         if seconds:
-            return min(86_400, max(1, seconds))
+            return min(86_400, max(1, seconds) + 1)
     return min(30, 2**attempt)
 
 
@@ -73,7 +80,7 @@ async def completion(messages, structured=False):
         }
     used_json_mode_fallback = False
     async with httpx.AsyncClient(timeout=60) as client:
-        for attempt in range(5):
+        for attempt in range(MAX_PROVIDER_ATTEMPTS):
             try:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -81,7 +88,7 @@ async def completion(messages, structured=False):
                     json=body,
                 )
             except httpx.TransportError as exc:
-                if attempt == 4:
+                if attempt == MAX_PROVIDER_ATTEMPTS - 1:
                     raise ProviderError(
                         "The model provider could not be reached. Retry the job."
                     ) from exc
@@ -89,7 +96,7 @@ async def completion(messages, structured=False):
                 continue
             if (
                 response.status_code == 429 or response.status_code >= 500
-            ) and attempt < 4:
+            ) and attempt < MAX_PROVIDER_ATTEMPTS - 1:
                 delay = retry_delay(response, attempt)
                 await asyncio.sleep(delay)
                 continue

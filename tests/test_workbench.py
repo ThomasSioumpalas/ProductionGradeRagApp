@@ -569,4 +569,4 @@ def test_provider_retry_delay_parses_daily_limit_window():
                 }
             }
 
-    assert retry_delay(FakeResponse(), 0) == pytest.approx(222.048)
+    assert retry_delay(FakeResponse(), 0) == pytest.approx(223.048)
