@@ -234,7 +234,19 @@ def test_metric_routing_keeps_statement_requests_small():
     assert all(m["id"].startswith("balance_sheet_") for m in metrics)
     assert {"id", "label", "unit"} == set(metrics[0])
     tasks = extraction_tasks([[({"page": 1}, "Statement of Financial Position")]])
-    assert tasks and all(len(task_metrics) <= 4 for _, task_metrics in tasks)
+    assert tasks and all(len(task_metrics) <= 10 for _, task_metrics in tasks)
+    assert max(len(task_metrics) for _, task_metrics in tasks) == 10
+
+
+def test_statement_chunk_uses_four_requests_instead_of_nine(monkeypatch):
+    all_metrics = [
+        {"id": f"balance_sheet_{i}", "label": f"Metric {i}", "unit": "money"}
+        for i in range(36)
+    ]
+    monkeypatch.setattr(engine_module, "metrics_for_chunk", lambda _content: all_metrics)
+    tasks = extraction_tasks([[({"page": 1}, "Statement of Financial Position")]])
+    assert len(tasks) == 4
+    assert sum(len(metric_group) for _, metric_group in tasks) == 36
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])

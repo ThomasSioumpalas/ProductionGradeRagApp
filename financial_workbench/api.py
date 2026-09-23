@@ -54,11 +54,12 @@ async def worker(app):
             job["pages"] = pages
             job["warnings"] = warnings
             all_chunks, candidate_chunks, batches = extraction_plan(pages)
+            extraction_plan_data = (all_chunks, candidate_chunks, batches)
             provider_tasks = extraction_tasks(batches)
             job["warnings"].append(
                 f"The PDF produced {len(all_chunks)} page-aware chunks. "
                 f"The extractor selected {len(candidate_chunks)} financially relevant chunks in "
-                f"starting with {len(provider_tasks)} bounded metric-group requests. Oversized outputs split into smaller requests automatically; "
+                f"{len(provider_tasks)} provider requests are planned. Dense outputs may add smaller retry requests; "
                 f"all {len(pages)} pages remain available for questions."
             )
             job["progress"] = {"done": 0, "total": len(provider_tasks)}
@@ -69,7 +70,7 @@ async def worker(app):
                 app.state.store.put(job)
 
             candidates, rejected = await extract(
-                pages, Settings(**job["settings"]), progress
+                pages, Settings(**job["settings"]), progress, plan=extraction_plan_data
             )
             job.update(status="review", candidates=candidates, rejected=rejected)
         except asyncio.CancelledError:

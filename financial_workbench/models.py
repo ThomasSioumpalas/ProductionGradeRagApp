@@ -34,7 +34,10 @@ class ExtractedFact(StrictModel):
 
 
 class Extraction(StrictModel):
-    facts: list[ExtractedFact] = Field(max_length=8)
+    # A single chunk can contain many rows across comparative annual columns.
+    # Keep enough room for 10 metrics x 3 years; oversized generations are
+    # still handled by the extractor's adaptive metric-group splitting.
+    facts: list[ExtractedFact] = Field(max_length=30)
 
 
 class Decision(StrictModel):
