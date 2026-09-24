@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -10,19 +11,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from financial_workbench.api import create_app
-from financial_workbench.documents import batch_windows, page_windows, read_pdf, select_extraction_windows
-import financial_workbench.engine as engine_module
+from financial_workbench.documents import page_windows, read_pdf, statement_plan
 from financial_workbench.engine import (
     CATALOG,
     METRICS,
     extract,
-    extraction_tasks,
+    mapping_tasks,
     parse_number,
     reconcile,
     validate_fact,
-    metrics_for_chunk,
 )
 from financial_workbench.models import ExtractedFact, Settings
+from financial_workbench.store import Store
 from financial_workbench.workbook import export_workbook
 
 
@@ -106,6 +106,13 @@ def test_grounding_and_scale(settings, page):
     )
 
 
+def test_tax_expense_sign_matches_workbook_convention(settings, page):
+    source = {**page, "text": page["text"] + " Income taxes (176,435)"}
+    c = validate_fact(fact(metric_id="income_statement_26", raw_value="(176,435)",
+                           quote="Income taxes (176,435)"), source, settings)
+    assert c["value"] == "176.435"
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -124,68 +131,73 @@ def test_reject_unsupported_claim(settings, page, change):
         validate_fact(fact(**change), page, settings)
 
 
-def test_conflicts_dedup_and_rejection(settings, page, monkeypatch):
-    monkeypatch.setattr(
-        engine_module,
-        "metrics_for_chunk",
-        lambda _content: [{"id": "income_statement_8", "label": "Revenue", "unit": "money"}],
-    )
-    other = {**page, "page": 2, "text": page["text"].replace("1,234.5", "2,234.5")}
+def test_conflicts_are_kept_for_review(settings):
+    def entry(n, raw):
+        quote = f"Revenue {raw} {raw} 100 100"
+        page = {"id": n, "file": "annual.pdf", "sha256": "a" * 64, "page": n,
+                "text": f"GROUP COMPANY 31/12/2025 31/12/2024 {quote}", "tables": quote}
+        row = {"row_id": f"{n}:full:0", "page": n, "file": "annual.pdf", "panel": "full",
+               "statement": "income", "section": "", "label": "Revenue", "quote": quote,
+               "currency": "EUR", "scale": 1000,
+               "values": [{"year": 2025, "scope": "consolidated", "header": "31/12/2025",
+                           "raw_value": raw, "x": 300}]}
+        return page, row
 
-    async def fake(messages, structured=False):
-        body = json.loads(messages[1]["content"])
-        if "income_statement_8" not in {m["id"] for m in body["metrics"]}:
-            return json.dumps({"facts": []})
-        n = body["pdf_chunks"][0]["page"]
-        f = fact(
-            page=n,
-            raw_value="1,234.5" if n == 1 else "2,234.5",
-            quote="Revenue 1,234.5" if n == 1 else "Revenue 2,234.5",
-        )
-        return json.dumps(
-            {
-                "facts": [
-                    f.model_dump(),
-                    f.model_dump(),
-                    fact(page=n, raw_value="999", quote="Made up 999").model_dump(),
-                ]
-            }
-        )
-
+    pairs = [entry(1, "1,234.5"), entry(2, "2,234.5")]
+    panels = [{"rows": [row]} for _, row in pairs]
     progress = []
-    candidates, rejected = asyncio.run(
-        extract(
-            [page, other], settings, lambda a, b: progress.append((a, b)), complete=fake
-        )
-    )
+    candidates, rejected = asyncio.run(extract(
+        [p for p, _ in pairs], settings, lambda a, b: progress.append((a, b)),
+        plan=(panels, [[row] for _, row in pairs]),
+    ))
     assert len(candidates) == 2 and all(c["status"] == "conflict" for c in candidates)
-    assert len(rejected) == 2 and progress[-1] == (2, 2)
+    assert not rejected and progress[-1] == (0, 0)
 
 
-def test_incomplete_group_is_split_and_retried(settings, page, monkeypatch):
+def test_identically_named_reports_keep_distinct_document_citations(settings):
+    pages, panels = [], []
+    for digest, amount in (("a" * 64, "1,000"), ("b" * 64, "2,000")):
+        quote = f"Revenue {amount}"
+        pages.append({"sha256": digest, "file": "annual.pdf", "page": 1,
+                      "text": "2025 " + quote, "tables": quote})
+        panels.append({"rows": [{"row_id": "1:full:0", "document_id": digest,
+                                   "file": "annual.pdf", "page": 1, "panel": "full",
+                                   "statement": "income", "section": "", "label": "Revenue",
+                                   "quote": quote, "currency": "EUR", "scale": 1000,
+                                   "values": [{"year": 2025, "scope": "consolidated",
+                                               "header": "2025", "raw_value": amount, "x": 330}]}]})
+    candidates, rejected = asyncio.run(extract(
+        pages, settings, lambda *_: None, plan=(panels, [p["rows"] for p in panels])))
+    assert not rejected
+    assert {(c["document_id"], c["value"]) for c in candidates} == {
+        ("a" * 64, "1.000"), ("b" * 64, "2.000")}
+
+
+def test_incomplete_label_mapping_is_split_and_retried(settings, page):
     from financial_workbench.llm import IncompleteOutputError
-
-    monkeypatch.setattr(
-        engine_module,
-        "metrics_for_chunk",
-        lambda _content: [
-            {"id": "income_statement_8", "label": "Revenue", "unit": "money"},
-            {"id": "income_statement_9", "label": "Cost of sales", "unit": "money"},
-        ],
-    )
     calls, progress = [], []
+    rows = [
+        {"row_id": f"1:full:{i}", "page": 1, "file": "annual.pdf", "panel": "full",
+         "statement": "income", "section": "", "label": label,
+         "quote": f"{label} 1,234.5", "currency": "EUR", "scale": 1000,
+         "values": [{"year": 2025, "scope": "consolidated", "header": "2025",
+                     "raw_value": "1,234.5", "x": 200}]}
+        for i, label in enumerate(["Revenue", "Other annual income", "Miscellaneous operating gain"])
+    ]
+    page = {**page, "text": page["text"] + " 2025 Revenue 1,234.5"}
+    plan = ([{"rows": rows}], [rows])
 
-    async def fake(_messages, structured=False):
+    async def fake(_messages, structured=False, **_kwargs):
         calls.append(_messages)
         body = json.loads(_messages[1]["content"])
-        if len(body["metrics"]) > 1:
+        if len(body["rows"]) > 1:
             raise IncompleteOutputError("length", "test output limit")
-        return json.dumps({"facts": []})
+        return json.dumps({"mappings": []})
 
     candidates, rejected = asyncio.run(
-        extract(pages=[page], settings=settings, progress=lambda a, b: progress.append((a, b)), complete=fake)
+        extract([page], settings, lambda a, b: progress.append((a, b)), complete=fake, plan=plan)
     )
-    assert candidates == [] and rejected == []
+    assert len(candidates) == 1 and rejected == []
     assert len(calls) == 3
     assert progress[-1] == (2, 2)
 
@@ -212,41 +224,56 @@ def test_pdf_and_page_chunks(tmp_path):
         read_pdf(blank, "scan.pdf")
 
 
-def test_large_pdf_chunks_are_bounded_and_batched():
-    pages = [
-        {"id": i, "file": "large.pdf", "sha256": "a" * 64, "page": i + 1,
-         "text": ("Statement of Financial Position Total assets Revenue " if i in (20, 120) else "Narrative page ") + "1,234 " * 2500,
-         "tables": ""}
-        for i in range(180)
-    ]
-    windows = list(page_windows(pages))
-    selected = select_extraction_windows(windows, max_chunks=12)
-    batches = batch_windows(selected)
-    assert len(windows) > 180
-    assert len(selected) == 12
-    assert {21, 121}.issubset({page["page"] for page, _ in selected})
-    assert all(len(batch) <= 1 and sum(len(chunk) for _, chunk in batch) <= 2_500 for batch in batches)
+def test_financial_statements_at_the_end_are_not_dropped():
+    pages = []
+    for n in range(180):
+        rows = ([{"row_id": f"{n}:full:0", "label": "Revenue", "statement": "income"}]
+                if n in (120, 179) else [])
+        pages.append({"file": "annual.pdf", "page": n + 1,
+                      "panels": [{"side": "full", "text": "Audit narrative", "rows": rows}]})
+    panels, tasks = statement_plan(pages)
+    assert {(p["page"], p["side"]) for p in panels} == {(121, "full"), (180, "full")}
+    assert len(tasks) == 2
 
 
-def test_metric_routing_keeps_statement_requests_small():
-    metrics = metrics_for_chunk("Statement of Financial Position Total assets cash and cash equivalents")
-    assert 1 <= len(metrics) <= 36
-    assert all(m["id"].startswith("balance_sheet_") for m in metrics)
-    assert {"id", "label", "unit"} == set(metrics[0])
-    tasks = extraction_tasks([[({"page": 1}, "Statement of Financial Position")]])
-    assert tasks and all(len(task_metrics) <= 10 for _, task_metrics in tasks)
-    assert max(len(task_metrics) for _, task_metrics in tasks) == 10
+def test_mapping_rejects_combined_balances_and_cannot_change_numbers(settings, page):
+    header = "31/12/2025"
+    rows = []
+    for i, (label, raw) in enumerate([
+        ("Cash and cash equivalents", "2,500"),
+        ("Trade and other receivables", "6,800"),
+    ]):
+        rows.append({"row_id": f"1:full:{i}", "page": 1, "file": "annual.pdf",
+                     "panel": "full", "statement": "balance", "section": "Current assets",
+                     "label": label, "quote": f"{label} {raw}", "scale": 1000, "currency": "EUR",
+                     "values": [{"year": 2025, "scope": "consolidated", "raw_value": raw,
+                                 "header": header, "x": 260}]})
+    page = {**page, "text": page["text"] + " " + header + " " +
+            " ".join(row["quote"] for row in rows)}
+    requests = []
+
+    async def fake(messages, structured=False, **kwargs):
+        requests.append(messages)
+        assert kwargs["schema"].__name__ == "RowMappings"
+        assert "2,500" not in json.dumps(messages) and "6,800" not in json.dumps(messages)
+        return json.dumps({"mappings": [{"row_id": rows[1]["row_id"],
+                                          "metric_id": "balance_sheet_10"}]})
+
+    candidates, rejected = asyncio.run(extract(
+        [page], settings, lambda a, b: None, complete=fake,
+        plan=([{"rows": rows}], [rows]),
+    ))
+    assert len(requests) == 1
+    assert [(c["metric_id"], c["value"]) for c in candidates] == [("balance_sheet_8", "2.500")]
+    assert len(rejected) == 1 and "Combined" in rejected[0]["reason"]
 
 
-def test_statement_chunk_uses_four_requests_instead_of_nine(monkeypatch):
-    all_metrics = [
-        {"id": f"balance_sheet_{i}", "label": f"Metric {i}", "unit": "money"}
-        for i in range(36)
-    ]
-    monkeypatch.setattr(engine_module, "metrics_for_chunk", lambda _content: all_metrics)
-    tasks = extraction_tasks([[({"page": 1}, "Statement of Financial Position")]])
-    assert len(tasks) == 4
-    assert sum(len(metric_group) for _, metric_group in tasks) == 36
+def test_row_mapping_calls_are_bounded():
+    rows = [{"row_id": str(i), "label": f"Other financial item {i}", "statement": "balance"}
+            for i in range(36)]
+    plan = ([{"rows": rows}], [rows[:16], rows[16:32], rows[32:]])
+    tasks = mapping_tasks(plan)
+    assert [len(task) for task in tasks] == [16, 16, 4]
 
 
 @pytest.mark.parametrize("lang", ["en", "el"])
@@ -319,9 +346,18 @@ def client(tmp_path, monkeypatch):
 
 def upload(client, settings):
     d = pymupdf.open()
-    d.new_page().insert_text(
-        (40, 60), "Example SA annual consolidated report 2025 EUR thousands Statement of Profit or Loss Revenue 100"
-    )
+    d.new_page().insert_text((40, 60), "Annual report 2025 narrative and audit background.")
+    p = d.new_page(width=650, height=850)
+    p.insert_text((40, 40), "Statement of Profit or Loss")
+    p.insert_text((40, 60), "In 000's Euros")
+    p.insert_text((355, 75), "GROUP", fontsize=8)
+    p.insert_text((505, 75), "COMPANY", fontsize=8)
+    for x, t in ((330, "31/12/2025"), (405, "31/12/2024"),
+                 (480, "31/12/2025"), (555, "31/12/2024")):
+        p.insert_text((x, 90), t, fontsize=8)
+    p.insert_text((40, 130), "Revenue")
+    for x, t in ((330, "100"), (405, "90"), (480, "80"), (555, "70")):
+        p.insert_text((x, 130), t, fontsize=8)
     pdf = d.tobytes()
     d.close()
     response = client.post(
@@ -433,35 +469,31 @@ def test_worker_pdf_to_ready_without_network(tmp_path, monkeypatch, settings):
     monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
     monkeypatch.delenv("WORKBENCH_API_KEY", raising=False)
 
-    async def fake_complete(messages, structured=False):
-        body = json.loads(messages[1]["content"])
-        assert "Revenue 100" in body["pdf_chunks"][0]["content"]
-        return json.dumps(
-            {
-                "facts": [
-                    fact(
-                        raw_value="100",
-                        quote="Revenue 100",
-                        context_quote="2025 EUR thousands",
-                    ).model_dump()
-                ]
-            }
-        )
+    async def fake_complete(*args, **kwargs):
+        raise AssertionError("Exact printed labels must not require a Groq request")
 
-    async def extraction(pages, config, progress):
-        return await extract(pages, config, progress, complete=fake_complete)
+    async def extraction(pages, config, progress, plan=None):
+        return await extract(pages, config, progress, complete=fake_complete, plan=plan)
 
     monkeypatch.setattr(api_module, "extract", extraction)
     with TestClient(create_app(tmp_path)) as client:
         job = upload(client, settings)
-        for _ in range(100):
+        for _ in range(200):
             result = client.get(f"/api/jobs/{job['id']}").json()
             if result["status"] in ("review", "failed"):
                 break
-            time.sleep(0.03)
+            time.sleep(0.05)
         assert result["status"] == "review", result.get("error")
         assert result["candidates"][0]["value"] == "0.100"
         c = result["candidates"][0]
+        assert c["column_header"] == "31/12/2025"
+        evidence = client.get(f"/api/jobs/{job['id']}/evidence").json()["items"]
+        assert len(evidence) == 1 and evidence[0]["row_count"] == 1
+        rows = client.get(f"/api/jobs/{job['id']}/evidence?page=2").json()["items"][0]["rows"]
+        assert rows[0]["values"][0]["raw_value"] == "100"
+        assert any(hit["page"] == 2 for hit in client.get(
+            f"/api/jobs/{job['id']}/search", params={"q": "revenue"}).json()["items"])
+        assert client.get(f"/api/jobs/{job['id']}/audit").json()["statement_evidence"][0]["rows"]
         assert client.get(
             f"/api/jobs/{job['id']}/documents/{c['document_id']}"
         ).content.startswith(b"%PDF-")
@@ -498,8 +530,9 @@ def test_question_isolation(client, settings, page, monkeypatch):
         stored = client.app.state.store.get(job["id"])
         stored.update(status="review", pages=[body])
         client.app.state.store.put(stored)
+        client.app.state.store.index_pages(job["id"], [body])
 
-    async def fake_complete(messages, structured=False):
+    async def fake_complete(messages, structured=False, **kwargs):
         assert "SECRET_987" not in json.dumps(messages)
         assert "Greek" in messages[0]["content"]
         return "Έσοδα με αναφορά [1]."
@@ -513,6 +546,71 @@ def test_question_isolation(client, settings, page, monkeypatch):
     assert response.json()["sources"][0]["file"] == "annual.pdf"
 
 
+def test_search_index_is_persistent_and_job_scoped(tmp_path):
+    a, b = "a" * 32, "b" * 32
+    store = Store(tmp_path)
+    store.index_pages(a, [{"sha256": "1" * 64, "file": "first.pdf", "page": 179,
+                           "text": "Revenue 100 on the final page",
+                           "panels": [{"side": "right", "text": "Revenue 100 on the final page",
+                                       "rows": [{"label": "Revenue", "quote": "Revenue 100"}]}]}])
+    store.index_pages(b, [{"sha256": "2" * 64, "file": "other.pdf", "page": 1,
+                           "text": "Revenue SECRET_987"}])
+    assert len(Store(tmp_path).search(a, "revenue")) == 2
+    assert all("SECRET_987" not in x["text"] for x in store.search(a, "revenue"))
+    assert store.search(a, 'revenue" OR SECRET_987')
+    store.delete(a)
+    assert not Store(tmp_path).search(a, "revenue")
+    assert Store(tmp_path).search(b, "revenue")
+
+
+def test_search_returns_match_from_late_in_a_long_pdf_page(tmp_path):
+    store = Store(tmp_path)
+    store.index_pages("x", [{"sha256": "f" * 64, "file": "large.pdf", "page": 190,
+                             "text": "narrative " * 2000 + "Final debt maturities are 2030."}])
+    matches = store.search("x", "debt maturities")
+    assert len(matches) == 1 and "Final debt maturities" in matches[0]["text"]
+    assert len(matches[0]["text"]) < 1200
+
+
+@pytest.mark.skipif(not os.getenv("WORKBENCH_REPORT_PDF"), reason="Requires locally supplied reference PDF")
+def test_real_annual_report_statement_columns_and_grounding(settings):
+    pdf = Path(os.environ["WORKBENCH_REPORT_PDF"])
+    pages, warnings = read_pdf(pdf, pdf.name)
+    panels, batches = statement_plan(pages)
+    assert len(pages) == 187
+    assert {(p["page"], p["side"]) for p in panels} == {
+        (125, "right"), (126, "left"), (126, "right"),
+        (127, "left"), (128, "right"), (129, "left"),
+    }
+    assert len(batches) <= 16
+    assert any("Revenue" in r["label"] for p in panels for r in p["rows"])
+    assert not any(p["page"] == 183 for p in panels)
+
+    async def empty_map(messages, structured=False, **kwargs):
+        assert kwargs["schema"].__name__ == "RowMappings"
+        assert not any(raw in json.dumps(messages) for raw in ("11,482,478", "8,039,778"))
+        return '{"mappings":[]}'
+
+    candidates, rejected = asyncio.run(extract(
+        pages, settings, lambda *_: None, complete=empty_map, plan=(panels, batches)))
+    figures = {(c["metric_id"], c["year"]): c for c in candidates}
+    for metric, year, amount, source_page, side in (
+        ("income_statement_8", 2025, "11482.478", 125, "right"),
+        ("income_statement_26", 2025, "176.435", 125, "right"),
+        ("balance_sheet_29", 2025, "8039.778", 126, "right"),
+        ("cash_flow_statement_18", 2025, "799.916", 128, "right"),
+        ("cash_flow_statement_27", 2025, "-449.332", 129, "left"),
+    ):
+        candidate = figures[(metric, year)]
+        assert (candidate["value"], candidate["page"], candidate["panel"]) == (
+            amount, source_page, side)
+        assert candidate["mapping_source"] == "exact label"
+        assert candidate["raw_value"] in candidate["quote"]
+    assert all(c["scope"] == "consolidated" for c in candidates)
+    assert all("trade and other" not in c["row_label"].lower()
+               for c in candidates if c["metric_id"] in ("balance_sheet_10", "balance_sheet_31"))
+
+
 def test_restart_marks_inflight_failed(tmp_path, monkeypatch, settings):
     monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
     monkeypatch.delenv("WORKBENCH_API_KEY", raising=False)
@@ -524,6 +622,22 @@ def test_restart_marks_inflight_failed(tmp_path, monkeypatch, settings):
     with TestClient(create_app(tmp_path, start_worker=False)) as client:
         assert client.get(f"/api/jobs/{j['id']}").json()["status"] == "failed"
         assert client.post(f"/api/jobs/{j['id']}/retry").json()["status"] == "queued"
+
+
+def test_restart_backfills_search_for_saved_jobs(tmp_path, monkeypatch, settings):
+    monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
+    with TestClient(create_app(tmp_path, start_worker=False)) as client:
+        job = upload(client, settings)
+        saved = client.app.state.store.get(job["id"])
+        saved.update(status="failed", pages=[{"sha256": "c" * 64,
+                                             "file": "annual.pdf", "page": 151,
+                                             "text": "The late-page debt schedule is searchable."}])
+        client.app.state.store.put(saved)
+        assert not client.app.state.store.has_index(job["id"])
+    with TestClient(create_app(tmp_path, start_worker=False)) as client:
+        response = client.get(f"/api/jobs/{job['id']}/search", params={"q": "debt schedule"})
+        assert response.status_code == 200
+        assert response.json()["items"][0]["page"] == 151
 
 
 def test_provider_schema_and_incomplete_output(monkeypatch):

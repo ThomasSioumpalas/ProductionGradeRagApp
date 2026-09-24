@@ -55,6 +55,17 @@ test("upload, review sources, save, and export Greek workbook", async ({
       return route.fulfill({ json: [] });
     if (p === "/api/jobs" && route.request().method() === "POST")
       return route.fulfill({ status: 202, json: job });
+    if (p.endsWith("/evidence")) return route.fulfill({ json: { items: [{
+      file: "annual.pdf", document_id: "a".repeat(64), page: 1, side: "full",
+      statement: "income", row_count: 1, headers: [{ year: 2025, scope: "consolidated", header: "2025" }],
+      scale: 1000, currency: "EUR",
+      rows: [{ row_id: "1:full:0", label: "Revenue", section: "", quote: "Revenue 123,450",
+        values: [{ scope: "consolidated", year: 2025, header: "2025", raw_value: "123,450" }] }],
+      text: "Revenue 123,450",
+    }] } });
+    if (p.endsWith("/search")) return route.fulfill({ json: { items: [
+      { file: "annual.pdf", document_id: "a".repeat(64), page: 1, side: "full", kind: "row", text: "Revenue 123,450" },
+    ] } });
     if (p.endsWith("/review")) {
       saved = route.request().postDataJSON();
       job = {
@@ -90,7 +101,7 @@ test("upload, review sources, save, and export Greek workbook", async ({
   ).toBeVisible();
   await page.screenshot({ path: "test-results/initial.png", fullPage: true });
   await page
-    .getByLabel("Company name as shown in the report")
+    .getByLabel("Company label in Excel")
     .fill("Example SA");
   await page
     .locator("input[type=file]")
@@ -112,6 +123,11 @@ test("upload, review sources, save, and export Greek workbook", async ({
   await expect(
     page.getByText("Revenue 123,450", { exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: /annual.pdf · p.1 full · income/ }).click();
+  await expect(page.getByText("Consolidated group 2025: 123,450", { exact: false })).toBeVisible();
+  await page.getByRole("textbox", { name: "Search PDF evidence" }).fill("revenue");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("button", { name: /annual.pdf · p.1 full · row/ })).toBeVisible();
   await page
     .getByRole("button", { name: "Select all unconflicted figures" })
     .click();
@@ -157,6 +173,7 @@ test("conflicts are not automatically selected and manual entry marks review dir
     const p = new URL(route.request().url()).pathname;
     if (p === "/api/catalog") return route.fulfill({ json: [metric] });
     if (p === "/api/jobs") return route.fulfill({ json: [job] });
+    if (p.endsWith("/evidence")) return route.fulfill({ json: { items: [] } });
     if (p.endsWith("/review")) {
       const d = route.request().postDataJSON().decisions;
       expect(d[0].manual_value).toBe("0");

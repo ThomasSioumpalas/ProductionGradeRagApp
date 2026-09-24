@@ -26,10 +26,213 @@ FINANCIAL_TERMS = (
 )
 PRIMARY_STATEMENT_TERMS = FINANCIAL_TERMS[:5]
 NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\(?-?\d{1,3}(?:[,. ]\d{3})+(?:[,.]\d+)?\)?|\(?-?\d+[,.]\d+\)?)")
+DATE_PATTERN = re.compile(r"(?:\d{1,2}/\d{1,2}-)?\d{1,2}/\d{1,2}/\d{2,4}$")
+AMOUNT_PATTERN = re.compile(r"(?:\(?[+\-−]?\d[\d.,]*\)?|0)$")
+STATEMENT_TITLES = (
+    ("income", re.compile(r"^\s*(?:consolidated\s+)?(?:statement of (?:profit or loss|comprehensive income|income)|income statement)\b", re.I | re.M)),
+    ("balance", re.compile(r"^\s*(?:consolidated\s+)?(?:statement of financial position|balance sheet)\b", re.I | re.M)),
+    ("equity", re.compile(r"^\s*(?:consolidated\s+)?statement of changes in equity\b", re.I | re.M)),
+    ("cash", re.compile(r"^\s*(?:consolidated\s+)?(?:statement of cash flows|cash flow statement)\b", re.I | re.M)),
+)
+MAX_ROWS_PER_REQUEST = 16
+
+
+def _split_spread(pdf_page):
+    """Split a genuine two-page landscape spread at its empty central gutter."""
+    width, height = pdf_page.rect.width, pdf_page.rect.height
+    if width < height * 1.25:
+        return False
+    words = pdf_page.get_text("words")
+    if len(words) < 60:
+        return False
+    left = sum(word[2] < width * .46 for word in words)
+    right = sum(word[0] > width * .54 for word in words)
+    gutter = sum(word[0] < width * .54 and word[2] > width * .46 for word in words)
+    return left > 25 and right > 25 and gutter < len(words) * .015
+
+
+def _lines(words):
+    lines = []
+    for word in sorted(words, key=lambda w: (w[1], w[0])):
+        # Long table labels often wrap above and below their amount baseline.
+        if lines and abs(word[1] - lines[-1]["last_y"]) < 6.2:
+            lines[-1]["words"].append(word)
+            lines[-1]["last_y"] = word[1]
+        else:
+            lines.append({"y": word[1], "last_y": word[1], "words": [word]})
+    for line in lines:
+        line["words"].sort(key=lambda w: w[0])
+    return lines
+
+
+def _year(token):
+    match = re.search(r"(\d{2,4})$", token)
+    if not match:
+        return None
+    n = int(match.group(1))
+    return n if n >= 1900 else (2000 + n if n < 80 else 1900 + n)
+
+
+def _statement_title(text):
+    start = text[:650].casefold()
+    if "contents" in start[:180] or "notes to the financial statements" in start[:250]:
+        return None
+    for kind, pattern in STATEMENT_TITLES:
+        if pattern.search(start):
+            return kind
+    return None
+
+
+def _table_headers(lines, text):
+    for line in lines:
+        dates = [word for word in line["words"] if DATE_PATTERN.fullmatch(word[4])]
+        if len(dates) not in (2, 4):
+            continue
+        # Infer each date's reporting scope from the printed headings above
+        # its column, never from a generic use of "company" elsewhere on a page.
+        headings = [word for heading in lines if line["y"] - 80 <= heading["y"] <= line["y"]
+                    for word in heading["words"] if word[4].casefold() in
+                    ("group", "consolidated", "company", "separate")]
+        group = [word for word in headings if word[4].casefold() in ("group", "consolidated")]
+        company = [word for word in headings if word[4].casefold() in ("company", "separate")]
+        if group and company:
+            boundary = (max(w[0] for w in group) + min(w[0] for w in company)) / 2
+            if max(w[0] for w in group) > min(w[0] for w in company):
+                boundary = (min(w[0] for w in group) + max(w[0] for w in company)) / 2
+                scopes = ["consolidated" if w[0] > boundary else "standalone" for w in dates]
+            else:
+                scopes = ["consolidated" if w[0] < boundary else "standalone" for w in dates]
+            if len(dates) == 4 and scopes.count("consolidated") != 2:
+                continue
+            if len(dates) == 2 and scopes[0] != scopes[1]:
+                continue
+        elif len(dates) == 2 and (group or company):
+            scopes = ["consolidated" if group else "standalone"] * 2
+        else:
+            continue
+        return [
+            {"x": (word[0] + word[2]) / 2, "start": word[0],
+             "year": _year(word[4]), "scope": scope, "header": word[4],
+             "y": line["y"]}
+            for word, scope in zip(dates, scopes)
+        ]
+    return []
+
+
+def _unit(text):
+    opening = text[:850].casefold()
+    if "euro" in opening or "eur" in opening or "ευρώ" in opening:
+        currency = "EUR"
+    elif "usd" in opening or "dollar" in opening:
+        currency = "USD"
+    elif "gbp" in opening or "pound sterling" in opening:
+        currency = "GBP"
+    else:
+        return None
+    if re.search(r"(?:000['’]s|\b0{3}\b|thousands?|χιλιάδ)", opening):
+        scale = 1000
+    elif re.search(r"(?:millions?|\bmillion\b|εκατομμύρ)", opening):
+        scale = 1000000
+    elif re.search(r"\b(in|amounts? in)\s+(?:euros?|eur|usd|gbp)\b", opening):
+        scale = 1
+    else:
+        return None
+    return currency, scale
+
+
+def _table_rows(lines, headers, panel, page):
+    first = min(header["start"] for header in headers) - 5
+    rows, section = [], ""
+    for line in lines:
+        if line["y"] < headers[0]["y"] + 8:
+            continue
+        words = line["words"]
+        label_words = sorted((word for word in words if word[0] < first), key=lambda w: (w[1], w[0]))
+        label = " ".join(word[4] for word in label_words).strip()
+        numbers = [word for word in words if word[0] >= first and AMOUNT_PATTERN.fullmatch(word[4])]
+        if not numbers:
+            if label and any(key in label.casefold() for key in (
+                "current assets", "current liabilities", "non-current assets",
+                "non-current liabilities", "operating activities", "investing activities",
+                "financing activities", "shareholders' equity", "equity",
+                "other comprehensive income", "earnings per share",
+            )):
+                section = label
+            continue
+        if len(numbers) != len(headers) or not re.search(r"[^\W\d_]", label):
+            continue
+        # Note references occupy the narrow gap just before the amount columns.
+        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:,\d+)?", label_words[-1][4]):
+            label = " ".join(word[4] for word in label_words[:-1]).strip()
+        values = []
+        for header, word in zip(headers, numbers):
+            if abs((word[0] + word[2]) / 2 - header["x"]) > 45:
+                break
+            values.append({"year": header["year"], "scope": header["scope"],
+                           "header": header["header"], "raw_value": word[4],
+                           "x": round(word[0], 1)})
+        if len(values) != len(headers):
+            continue
+        row = {
+            "row_id": f"{page['page']}:{panel['side']}:{len(rows)}",
+            "page": page["page"], "file": page["file"], "document_id": page["sha256"],
+            "panel": panel["side"],
+            "statement": panel["statement"], "section": section, "label": label,
+            "quote": " ".join(word[4] for word in label_words + numbers),
+            "currency": panel["currency"], "scale": panel["scale"],
+            "values": values,
+        }
+        rows.append(row)
+        if label.casefold() in ("profit after tax", "total comprehensive income"):
+            section = label
+    return rows
+
+
+def _annotate_statements(pages):
+    active = None
+    in_notes = False
+    document = None
+    for page in pages:
+        if page["sha256"] != document:
+            active, in_notes, document = None, False, page["sha256"]
+        for panel in page["panels"]:
+            text = panel["text"]
+            if "contents" in text[:200].casefold() or "notes to the financial statements" in text[:350].casefold():
+                active = None
+            if "notes to the financial statements" in text[:350].casefold():
+                in_notes = True
+            heading = _statement_title(text)
+            if heading and not in_notes:
+                active = heading
+            lines = _lines(panel.pop("_words"))
+            headers = _table_headers(lines, text)
+            unit = _unit(text)
+            if active and headers and unit:
+                panel["statement"] = active
+                panel["headers"] = [{k: v for k, v in h.items() if k != "y"} for h in headers]
+                panel["currency"], panel["scale"] = unit
+                panel["rows"] = _table_rows(lines, headers, panel, page)
+                page["tables"] += "\n".join(row["quote"] for row in panel["rows"]) + "\n"
+            else:
+                is_continuation = active and re.search(r"\b(group|company)\b", text[:240], re.I)
+                panel.update(statement=active if heading or is_continuation else None,
+                             headers=[], rows=[])
+
+
+def statement_plan(pages):
+    """Select all detected statement rows, regardless of where they occur in a PDF."""
+    panels = [panel | {"file": page["file"], "page": page["page"]}
+              for page in pages for panel in page.get("panels", []) if panel.get("rows")]
+    tasks = []
+    for panel in panels:
+        rows = panel["rows"]
+        for start in range(0, len(rows), MAX_ROWS_PER_REQUEST):
+            tasks.append(rows[start:start + MAX_ROWS_PER_REQUEST])
+    return panels, tasks
 
 
 def read_pdf(path: Path, filename: str, start_id: int = 0):
-    """Read page text once without expensive table detection on every page."""
+    """Read every page once, preserving separate columns on two-page spreads."""
     pages, warnings = [], []
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     with pymupdf.open(path) as doc:
@@ -38,11 +241,20 @@ def read_pdf(path: Path, filename: str, start_id: int = 0):
         if len(doc) > MAX_PAGES:
             raise ValueError(f"PDF exceeds {MAX_PAGES} pages: {filename}")
         for index, page in enumerate(doc):
-            text = page.get_text("text", sort=True).strip()
+            width, height = page.rect.width, page.rect.height
+            clips = (
+                [("left", pymupdf.Rect(0, 0, width / 2, height)),
+                 ("right", pymupdf.Rect(width / 2, 0, width, height))]
+                if _split_spread(page) else [("full", page.rect)]
+            )
+            panels = [{"side": side, "text": page.get_text("text", clip=clip, sort=True).strip(),
+                       "_words": page.get_text("words", clip=clip)} for side, clip in clips]
+            text = "\n\n".join(f"[{p['side']}]\n{p['text']}" for p in panels)
             if len(text) < 40:
                 warnings.append(f"{filename}, page {index + 1}: little or no readable text; OCR may be needed.")
             pages.append({"id": start_id + index, "file": filename, "sha256": digest,
-                          "page": index + 1, "text": text, "tables": ""})
+                          "page": index + 1, "text": text, "tables": "", "panels": panels})
+    _annotate_statements(pages)
     if not pages or not any(len(p["text"]) >= 40 for p in pages):
         raise ValueError(f"No usable text in {filename}. Run OCR before uploading.")
     return pages, warnings

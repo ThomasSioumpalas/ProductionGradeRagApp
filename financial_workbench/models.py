@@ -40,6 +40,15 @@ class Extraction(StrictModel):
     facts: list[ExtractedFact] = Field(max_length=30)
 
 
+class RowMapping(StrictModel):
+    row_id: str
+    metric_id: str
+
+
+class RowMappings(StrictModel):
+    mappings: list[RowMapping] = Field(max_length=16)
+
+
 class Decision(StrictModel):
     metric_id: str
     year: int

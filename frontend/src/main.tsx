@@ -32,7 +32,31 @@ type Candidate = {
   status: string;
   raw_value: string;
   scale: number;
+  panel?: string;
+  row_label?: string;
+  column_header?: string;
+  mapping_source?: string;
 };
+type EvidencePanel = {
+  file: string;
+  document_id: string;
+  page: number;
+  side: string;
+  statement: string | null;
+  row_count: number;
+  headers: { scope: string; year: number; header: string }[];
+  currency?: string;
+  scale?: number;
+  text?: string;
+  rows?: {
+    row_id: string;
+    label: string;
+    section: string;
+    quote: string;
+    values: { year: number; scope: string; header: string; raw_value: string }[];
+  }[];
+};
+type SearchHit = { file: string; document_id: string; page: number; side: string; kind: string; text: string };
 type Decision = {
   metric_id: string;
   year: number;
@@ -96,6 +120,10 @@ function App() {
       document_id: string;
     }[];
   } | null>(null);
+  const [evidencePanels, setEvidencePanels] = useState<EvidencePanel[]>([]),
+    [activeEvidence, setActiveEvidence] = useState<EvidencePanel | null>(null),
+    [searchTerm, setSearchTerm] = useState(""),
+    [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [editing, setEditing] = useState<string | null>(null),
     [manual, setManual] = useState(""),
     [note, setNote] = useState("");
@@ -140,6 +168,9 @@ function App() {
     setYear(j.settings.latest_year);
     setDirty(false);
     setAnswer(null);
+    setEvidencePanels([]);
+    setActiveEvidence(null);
+    setSearchHits([]);
     setMessage("");
     setEditing(null);
     setDraft(
@@ -177,6 +208,27 @@ function App() {
       clearInterval(id);
     };
   }, [job?.id, job?.status, key]);
+  useEffect(() => {
+    if (!job || ["queued", "extracting"].includes(job.status)) return;
+    let cancelled = false;
+    void api(`/jobs/${job.id}/evidence`)
+      .then((r) => r.json())
+      .then((data: { items: EvidencePanel[] }) => {
+        if (!cancelled) setEvidencePanels(data.items);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => { cancelled = true; };
+  }, [job?.id, job?.status, key]);
+  async function showEvidence(item: EvidencePanel) {
+    if (!job) return;
+    await action(async () => {
+      const params = new URLSearchParams({ page: String(item.page), document_id: item.document_id, side: item.side });
+      const data = await (await api(`/jobs/${job.id}/evidence?${params}`)).json();
+      setActiveEvidence(data.items[0] || null);
+    });
+  }
   async function action(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -549,6 +601,60 @@ function App() {
                     </button>
                   </section>
                 )}
+                {!['queued', 'extracting'].includes(job.status) && (
+                  <section className="panel evidence-browser">
+                    <h3>{t.reading}</h3>
+                    <p>{t.readingHelp}</p>
+                    <div className="panel-picker">
+                      {evidencePanels.map((panel) => (
+                        <button
+                          key={`${panel.document_id}:${panel.page}:${panel.side}`}
+                          className="subtle"
+                          onClick={() => void showEvidence(panel)}
+                        >
+                          {panel.file} · p.{panel.page} {panel.side} · {panel.statement} · {panel.row_count} {t.rows}
+                        </button>
+                      ))}
+                      {evidencePanels.length === 0 && <p>{t.noStatementPanels}</p>}
+                    </div>
+                    {activeEvidence && (
+                      <div className="parsed-panel">
+                        <h4>{activeEvidence.statement || t.source} · p.{activeEvidence.page} {activeEvidence.side}</h4>
+                        <p>{activeEvidence.headers.map((h) => `${h.scope} ${h.header}`).join(' · ')} {activeEvidence.scale ? `· ${activeEvidence.currency} × ${activeEvidence.scale.toLocaleString()}` : ''}</p>
+                        <button className="subtle" onClick={() => void openDoc(activeEvidence.document_id, activeEvidence.page)}>{t.open}</button>
+                        <div className="parsed-rows">
+                          {activeEvidence.rows?.map((row) => (
+                            <div key={row.row_id}>
+                              <b>{row.label}</b>
+                              <small>{row.section}</small>
+                              <span>{row.values.map((v) => `${v.scope === 'consolidated' ? t.consolidated : t.standalone} ${v.year}: ${v.raw_value}`).join(' · ')}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <details><summary>{t.rawText}</summary><pre>{activeEvidence.text}</pre></details>
+                      </div>
+                    )}
+                    <form className="evidence-search" onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!searchTerm.trim()) return;
+                      void action(async () => {
+                        const data = await (await api(`/jobs/${job.id}/search?q=${encodeURIComponent(searchTerm)}`)).json();
+                        setSearchHits(data.items);
+                      });
+                    }}>
+                      <input aria-label={t.searchEvidence} placeholder={t.searchEvidence} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} minLength={2} required />
+                      <button disabled={busy}>{t.search}</button>
+                    </form>
+                    {searchHits.map((hit, i) => (
+                      <div className="search-hit" key={`${hit.document_id}:${hit.page}:${hit.side}:${hit.kind}:${i}`}>
+                        <button className="subtle" onClick={() => void openDoc(hit.document_id, hit.page)}>
+                          {hit.file} · p.{hit.page} {hit.side} · {hit.kind}
+                        </button>
+                        <p>{hit.text.slice(0, 380)}</p>
+                      </div>
+                    ))}
+                  </section>
+                )}
                 {available && (
                   <>
                     <div className="stats">
@@ -719,6 +825,7 @@ function App() {
                                         {c.scale.toLocaleString()} → {c.value} (
                                         {m.unit})
                                       </small>
+                                      {c.row_label && <small>{c.row_label} · {c.panel} · {c.column_header} · {c.mapping_source}</small>}
                                       <button
                                         className="subtle"
                                         onClick={() =>

@@ -6,7 +6,7 @@ export const copy = {
     intro:
       "Upload annual reports, review the evidence, and take a complete analysis workbook with you.",
     new: "New analysis",
-    company: "Company name as shown in the report",
+    company: "Company label in Excel",
     year: "Latest fiscal year",
     scope: "Reporting scope",
     consolidated: "Consolidated group",
@@ -19,7 +19,14 @@ export const copy = {
       "Up to 10 PDFs · 40 MB each · 100 MB total. Run OCR on scanned reports first.",
     start: "Extract financial data",
     provider:
-      "PDF text is sent to Groq for extraction. Your API key stays on the server.",
+      "The server reads PDF table columns; Groq maps unfamiliar row labels and answers questions. Your API key stays on the server.",
+    reading: "What the app read",
+    readingHelp: "Open a statement panel to see the printed rows, year columns and scope. Search every uploaded PDF below, including pages outside the statements.",
+    rows: "rows",
+    noStatementPanels: "No dated statement tables were recognized. Search the PDF text or review the extraction notices.",
+    rawText: "Show raw PDF text",
+    searchEvidence: "Search PDF evidence",
+    search: "Search",
     language: "Interface & workbook language",
     history: "Recent analyses",
     review: "Review financial inputs",
@@ -85,7 +92,7 @@ export const copy = {
     required: "Enter the company name and choose at least one PDF.",
     pending: "Unsaved changes: save your review before downloading.",
     progressHelp:
-      "The report is being split into page-aware financial chunks and processed in small batches. You can return to this analysis later.",
+      "The app reads dated PDF columns and maps unfamiliar row labels in small requests. You can return to this analysis later.",
     checkNames: [
       "Assets = liabilities + equity",
       "Assets = current + non-current",
@@ -101,7 +108,7 @@ export const copy = {
     intro:
       "Ανεβάστε ετήσιες εκθέσεις, ελέγξτε τις πηγές και κατεβάστε το πλήρες αρχείο ανάλυσης.",
     new: "Νέα ανάλυση",
-    company: "Επωνυμία όπως εμφανίζεται στην έκθεση",
+    company: "Επωνυμία όπως θα εμφανιστεί στο Excel",
     year: "Τελευταία οικονομική χρήση",
     scope: "Πεδίο αναφοράς",
     consolidated: "Ενοποιημένος όμιλος",
@@ -114,7 +121,14 @@ export const copy = {
       "Έως 10 PDF · 40 MB ανά αρχείο · 100 MB συνολικά. Για σαρωμένα έγγραφα απαιτείται πρώτα OCR.",
     start: "Εξαγωγή οικονομικών στοιχείων",
     provider:
-      "Το κείμενο των PDF αποστέλλεται στο Groq. Το κλειδί API παραμένει στον διακομιστή.",
+      "Ο διακομιστής διαβάζει τις στήλες του PDF. Το Groq αντιστοιχίζει άγνωστες γραμμές και απαντά σε ερωτήσεις. Το κλειδί API παραμένει στον διακομιστή.",
+    reading: "Τι διάβασε η εφαρμογή",
+    readingHelp: "Δείτε τις γραμμές, τα έτη και το πεδίο κάθε κατάστασης. Αναζητήστε οποιαδήποτε σελίδα των PDF παρακάτω.",
+    rows: "γραμμές",
+    noStatementPanels: "Δεν αναγνωρίστηκαν καταστάσεις με στήλες ετών. Ελέγξτε το κείμενο και τις παρατηρήσεις εξαγωγής.",
+    rawText: "Πρωτότυπο κείμενο PDF",
+    searchEvidence: "Αναζήτηση στα PDF",
+    search: "Αναζήτηση",
     language: "Γλώσσα εφαρμογής και αρχείου",
     history: "Πρόσφατες αναλύσεις",
     review: "Έλεγχος οικονομικών στοιχείων",
@@ -180,7 +194,7 @@ export const copy = {
     required: "Συμπληρώστε επωνυμία και επιλέξτε τουλάχιστον ένα PDF.",
     pending: "Μη αποθηκευμένες αλλαγές: αποθηκεύστε τον έλεγχο πριν τη λήψη.",
     progressHelp:
-      "Η έκθεση χωρίζεται σε οικονομικά τμήματα με αναφορά στη σελίδα και επεξεργάζεται σε μικρές παρτίδες. Μπορείτε να επιστρέψετε αργότερα.",
+      "Η εφαρμογή διαβάζει τις στήλες με τα έτη και αντιστοιχίζει άγνωστες γραμμές με λίγα αιτήματα. Μπορείτε να επιστρέψετε αργότερα.",
     checkNames: [
       "Ενεργητικό = υποχρεώσεις + ίδια κεφάλαια",
       "Ενεργητικό = κυκλοφορούν + μη κυκλοφορούν",

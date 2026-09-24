@@ -49,7 +49,7 @@ def retry_delay(response, attempt):
     return min(30, 2**attempt)
 
 
-async def completion(messages, structured=False):
+async def completion(messages, structured=False, schema=None, max_tokens=None):
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise ProviderError(
@@ -61,7 +61,7 @@ async def completion(messages, structured=False):
         "temperature": 0,
         # Primary statement pages need a bounded list of figures, not a long
         # report. Keeping this small avoids multi-minute generation stalls.
-        "max_completion_tokens": 1600 if structured else 3000,
+        "max_completion_tokens": max_tokens or (1600 if structured else 3000),
     }
     if structured:
         # GPT-OSS defaults to medium reasoning, which can consume the entire
@@ -75,7 +75,7 @@ async def completion(messages, structured=False):
             "json_schema": {
                 "name": "financial_facts",
                 "strict": True,
-                "schema": Extraction.model_json_schema(),
+                "schema": (schema or Extraction).model_json_schema(),
             },
         }
     used_json_mode_fallback = False

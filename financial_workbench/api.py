@@ -17,8 +17,8 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
-from .documents import extraction_plan, read_pdf
-from .engine import CATALOG, METRICS, extract, extraction_tasks, reconcile
+from .documents import read_pdf, statement_plan
+from .engine import CATALOG, METRICS, extract, mapping_tasks, reconcile
 from .llm import ProviderError, completion
 from .models import Question, Review, Settings
 from .store import Store
@@ -53,15 +53,26 @@ async def worker(app):
                 )
             job["pages"] = pages
             job["warnings"] = warnings
-            all_chunks, candidate_chunks, batches = extraction_plan(pages)
-            extraction_plan_data = (all_chunks, candidate_chunks, batches)
-            provider_tasks = extraction_tasks(batches)
+            panels, row_batches = statement_plan(pages)
+            extraction_plan_data = (panels, row_batches)
+            provider_tasks = mapping_tasks(extraction_plan_data)
+            app.state.store.index_pages(job["id"], pages)
+            skipped = [
+                (page["page"], panel["side"])
+                for page in pages for panel in page.get("panels", [])
+                if panel.get("statement") and not panel.get("rows")
+            ]
             job["warnings"].append(
-                f"The PDF produced {len(all_chunks)} page-aware chunks. "
-                f"The extractor selected {len(candidate_chunks)} financially relevant chunks in "
-                f"{len(provider_tasks)} provider requests are planned. Dense outputs may add smaller retry requests; "
-                f"all {len(pages)} pages remain available for questions."
+                f"Searched all {len(pages)} PDF pages. Found {len(panels)} readable "
+                f"statement panels and {sum(len(panel['rows']) for panel in panels)} numeric rows; "
+                f"{len(provider_tasks)} Groq row-label requests are planned. "
+                "The rows and every PDF panel are available in Evidence search."
             )
+            if skipped:
+                job["warnings"].append(
+                    "Statement panels without supported dated columns need manual review: "
+                    + ", ".join(f"page {p} {side}" for p, side in skipped[:15])
+                )
             job["progress"] = {"done": 0, "total": len(provider_tasks)}
             app.state.store.put(job)
 
@@ -99,6 +110,8 @@ def create_app(root=None, start_worker=True):
         )
         # Exactly one uvicorn worker is supported for this local application.
         for job in app.state.store.all():
+            if job.get("pages") and not app.state.store.has_index(job["id"]):
+                app.state.store.index_pages(job["id"], job["pages"])
             if job["status"] == "extracting":
                 job.update(
                     status="failed",
@@ -345,7 +358,17 @@ def create_app(root=None, start_worker=True):
 
     @app.get("/api/jobs/{job_id}/audit", dependencies=auth)
     def audit(job_id: str):
-        job = public(get_job(job_id))
+        saved = get_job(job_id)
+        job = public(saved)
+        job["statement_evidence"] = [
+            {"file": page["file"], "document_id": page["sha256"],
+             "page": page["page"], "side": panel["side"],
+             "statement": panel["statement"], "headers": panel["headers"],
+             "currency": panel.get("currency"), "scale": panel.get("scale"),
+             "rows": panel["rows"]}
+            for page in saved["pages"] for panel in page.get("panels", [])
+            if panel.get("statement")
+        ]
         return Response(
             json.dumps(job, ensure_ascii=False, indent=2),
             media_type="application/json",
@@ -354,29 +377,67 @@ def create_app(root=None, start_worker=True):
             },
         )
 
+    @app.get("/api/jobs/{job_id}/evidence", dependencies=auth)
+    def evidence(job_id: str, page: int | None = None,
+                 document_id: str | None = None, side: str | None = None):
+        job = get_job(job_id)
+        if page is not None and page < 1:
+            raise HTTPException(422, "Page must be positive")
+        items = []
+        for item in job["pages"]:
+            if page is not None and item["page"] != page:
+                continue
+            if document_id and item["sha256"] != document_id:
+                continue
+            for panel in item.get("panels", []):
+                if side and panel["side"] != side:
+                    continue
+                if page is None and not panel.get("statement"):
+                    continue
+                data = {
+                    "file": item["file"], "document_id": item["sha256"],
+                    "page": item["page"], "side": panel["side"],
+                    "statement": panel.get("statement"),
+                    "row_count": len(panel.get("rows", [])),
+                    "headers": panel.get("headers", []),
+                    "currency": panel.get("currency"), "scale": panel.get("scale"),
+                }
+                if page is not None:
+                    data.update(text=panel["text"], rows=panel.get("rows", []))
+                items.append(data)
+        return {"items": items}
+
+    @app.get("/api/jobs/{job_id}/search", dependencies=auth)
+    def search(job_id: str, q: str):
+        job = get_job(job_id)
+        if not job["pages"]:
+            raise HTTPException(409, "PDF pages are not indexed yet")
+        if not 2 <= len(q.strip()) <= 300:
+            raise HTTPException(422, "Search must be between 2 and 300 characters")
+        return {"items": app.state.store.search(job_id, q, limit=12)}
+
     @app.post("/api/jobs/{job_id}/ask", dependencies=auth)
     async def ask(job_id: str, payload: Question):
         job = get_job(job_id)
-        if job["status"] not in ("review", "ready"):
-            raise HTTPException(409, "Extraction must finish first.")
-        # Document-set isolation: retrieval can only see this job's uploaded pages.
-        from rank_bm25 import BM25Okapi
-
-        pages = [p for p in job["pages"] if p["text"].strip()]
-        tokens = lambda s: re.findall(r"\w+", s.casefold())
-        bm25 = BM25Okapi([tokens(p["text"] + " " + p["tables"]) for p in pages])
-        scores = bm25.get_scores(tokens(payload.question))
-        selected = sorted(range(len(pages)), key=lambda i: scores[i], reverse=True)[:6]
+        if not job["pages"]:
+            raise HTTPException(409, "PDF pages are not indexed yet.")
+        matches = app.state.store.search(job_id, payload.question, limit=6)
+        if not matches:
+            return {"answer": "Δεν βρέθηκαν σχετικά αποσπάσματα." if payload.language == "el"
+                    else "No matching passages were found in these PDFs.", "sources": []}
         contexts = [
             {
                 "citation": i + 1,
-                "file": pages[n]["file"],
-                "page": pages[n]["page"],
-                "document_id": pages[n]["sha256"],
-                "text": (pages[n]["text"] + "\n" + pages[n]["tables"])[:14000],
+                "file": match["file"], "page": match["page"],
+                "document_id": match["document_id"], "side": match["side"],
+                "kind": match["kind"], "text": match["text"][:2200],
             }
-            for i, n in enumerate(selected)
+            for i, match in enumerate(matches)
         ]
+        terms = re.findall(r"[^\W_]+", payload.question.casefold())
+        inputs = [d for d in job["decisions"] if any(
+            term in METRICS[d["metric_id"]]["label"]["en"].casefold() for term in terms
+        )][:20]
         try:
             answer = await completion(
                 [
@@ -403,7 +464,7 @@ def create_app(root=None, start_worker=True):
                                         "page": d.get("page"),
                                         "note": d.get("note", ""),
                                     }
-                                    for d in job["decisions"]
+                                    for d in inputs
                                 ],
                                 "pages": contexts,
                             },
