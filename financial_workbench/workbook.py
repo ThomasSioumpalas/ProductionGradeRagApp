@@ -17,7 +17,7 @@ def text(cell, value):
     cell.data_type = "s"
 
 
-def export_workbook(settings, decisions, checks):
+def export_workbook(settings, decisions, checks, reviewed=True):
     language = settings.language
     wb = openpyxl.load_workbook(
         Path(__file__).parent / "templates" / f"{language}.xlsx"
@@ -69,9 +69,11 @@ def export_workbook(settings, decisions, checks):
     overview = wb.worksheets[0]
     text(
         overview["K7"],
-        "Only reviewed inputs are populated. Missing data remains blank. See Export Review."
-        if language == "en"
-        else "Συμπληρώνονται μόνο ελεγμένα στοιχεία. Τα ελλείποντα παραμένουν κενά. Δείτε Έλεγχος Εξαγωγής.",
+        ("Only reviewed inputs are populated. Missing data remains blank. See Export Review."
+         if reviewed else "DRAFT: extracted figures are unreviewed. Conflicts and missing inputs remain blank. See Export Review.")
+        if language == "en" else
+        ("Συμπληρώνονται μόνο ελεγμένα στοιχεία. Τα ελλείποντα παραμένουν κενά. Δείτε Έλεγχος Εξαγωγής."
+         if reviewed else "ΠΡΟΣΧΕΔΙΟ: τα στοιχεία δεν έχουν ελεγχθεί. Οι ασυμφωνίες και τα ελλείποντα παραμένουν κενά."),
     )
     audit = wb.create_sheet("Export Review" if language == "en" else "Έλεγχος Εξαγωγής")
     headers = (
@@ -107,12 +109,12 @@ def export_workbook(settings, decisions, checks):
             d = chosen.get((m["id"], year))
             r = audit.max_row + 1
             status = (
-                ("Manual" if d and d.get("manual") else "Reviewed" if d else "Missing")
+                ("Manual" if d and d.get("manual") else ("Reviewed" if reviewed else "Unreviewed") if d else "Missing")
                 if language == "en"
                 else (
                     "Χειροκίνητο"
                     if d and d.get("manual")
-                    else "Ελέγχθηκε"
+                    else ("Ελέγχθηκε" if reviewed else "Μη ελεγμένο")
                     if d
                     else "Λείπει"
                 )

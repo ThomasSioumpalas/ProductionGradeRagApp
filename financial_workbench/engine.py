@@ -342,6 +342,23 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
     return candidates, rejected
 
 
+def provisional_decisions(candidates):
+    """Choose one cited source per metric/year only when all candidates agree.
+
+    This produces a draft, not a reviewed financial statement. Conflicting
+    amounts are left blank for the user to resolve in the review screen.
+    """
+    by_metric_year = {}
+    for candidate in candidates:
+        by_metric_year.setdefault((candidate["metric_id"], candidate["year"]), []).append(candidate)
+    return [
+        {**sorted(group, key=lambda c: (c.get("file", ""), c.get("page", 0), c["id"]))[0],
+         "manual": False}
+        for group in by_metric_year.values()
+        if len({Decimal(c["value"]) for c in group}) == 1
+    ]
+
+
 def reconcile(decisions, settings):
     values = {(d["metric_id"], d["year"]): Decimal(d["value"]) for d in decisions}
     issues = []

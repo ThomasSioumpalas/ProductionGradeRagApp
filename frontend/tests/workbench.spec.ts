@@ -84,6 +84,11 @@ test("upload, review sources, save, and export Greek workbook", async ({
       return route.fulfill({ json: job });
     }
     if (p.endsWith("/workbook")) {
+      if (u.searchParams.get("draft") === "true") {
+        expect(u.searchParams.get("language")).toBe("en");
+        return route.fulfill({ body: "draft-fixture", contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      }
       expect(u.searchParams.get("language")).toBe("el");
       return route.fulfill({
         body: "workbook-fixture",
@@ -119,6 +124,10 @@ test("upload, review sources, save, and export Greek workbook", async ({
   await expect(
     page.getByRole("button", { name: "Download Excel", exact: false }),
   ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save reviewed inputs" })).toBeDisabled();
+  const draftDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download draft Excel", exact: false }).click();
+  expect((await draftDownload).suggestedFilename()).toBe(`financial-draft-en-2025-${job.id.slice(0, 8)}.xlsx`);
   await page.getByText("Source evidence", { exact: true }).click();
   await expect(
     page.getByText("Revenue 123,450", { exact: true }),
@@ -145,7 +154,7 @@ test("upload, review sources, save, and export Greek workbook", async ({
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Λήψη Excel", exact: false }).click();
   expect((await download).suggestedFilename()).toBe(
-    "financial-analysis-el-2025.xlsx",
+    `financial-analysis-el-2025-${job.id.slice(0, 8)}.xlsx`,
   );
   await page.screenshot({
     path: "test-results/review-greek.png",

@@ -254,19 +254,20 @@ function App() {
       await refresh();
     });
   }
-  async function download(kind: "workbook" | "audit") {
+  async function download(kind: "workbook" | "draft" | "audit") {
     if (!job) return;
     await action(async () => {
       const r = await api(
-        `/jobs/${job.id}/${kind}${kind === "workbook" ? `?language=${lang}` : ""}`,
+        kind === "audit" ? `/jobs/${job.id}/audit` :
+          `/jobs/${job.id}/workbook?language=${lang}${kind === "draft" ? "&draft=true" : ""}`,
       );
       const url = URL.createObjectURL(await r.blob());
       const a = document.createElement("a");
       a.href = url;
       a.download =
-        kind === "workbook"
-          ? `financial-analysis-${lang}-${job.settings.latest_year}.xlsx`
-          : "financial-evidence.json";
+        kind !== "audit"
+          ? `financial-${kind === "draft" ? "draft" : "analysis"}-${lang}-${job.settings.latest_year}-${job.id.slice(0, 8)}.xlsx`
+          : `financial-evidence-${job.id.slice(0, 8)}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     });
@@ -291,6 +292,9 @@ function App() {
   });
   const conflicts = [...grouped.values()].filter(
     (cs) => new Set(cs.map((c) => c.value)).size > 1,
+  ).length;
+  const draftCount = [...grouped.values()].filter(
+    (cs) => new Set(cs.map((c) => c.value)).size === 1,
   ).length;
   const available = job && ["review", "ready"].includes(job.status);
   const status = (s: string) =>
@@ -878,9 +882,15 @@ function App() {
                         })}
                       </div>
                       <div className="export">
+                        {(job.status === "review" || (job.status === "ready" && job.decisions.length === 0)) && draftCount > 0 && (
+                          <>
+                            <button disabled={busy} onClick={() => download("draft")}>{t.draft} · {lang.toUpperCase()}</button>
+                            <small>{t.draftHelp.replace("{count}", String(draftCount))}</small>
+                          </>
+                        )}
                         <button
                           className="primary"
-                          disabled={busy}
+                          disabled={busy || Object.keys(draft).length === 0}
                           onClick={() =>
                             action(async () => {
                               const j = await (
@@ -901,7 +911,7 @@ function App() {
                           {t.save}
                         </button>
                         <button
-                          disabled={busy || dirty || job.status !== "ready"}
+                          disabled={busy || dirty || job.status !== "ready" || job.decisions.length === 0}
                           onClick={() => download("workbook")}
                         >
                           {t.download} · {lang.toUpperCase()}

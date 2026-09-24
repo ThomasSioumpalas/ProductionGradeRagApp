@@ -18,6 +18,7 @@ from financial_workbench.engine import (
     extract,
     mapping_tasks,
     parse_number,
+    provisional_decisions,
     reconcile,
     validate_fact,
 )
@@ -152,6 +153,15 @@ def test_conflicts_are_kept_for_review(settings):
     ))
     assert len(candidates) == 2 and all(c["status"] == "conflict" for c in candidates)
     assert not rejected and progress[-1] == (0, 0)
+
+
+def test_draft_chooses_only_uncontested_figures(settings, page):
+    a = validate_fact(fact(), page, settings)
+    repeated = {**a, "id": "other-citation", "value": "1.23450"}
+    conflict = {**a, "id": "conflicting-source", "value": "2.0"}
+    other = {**a, "id": "other-metric", "metric_id": "income_statement_9", "value": "0.2"}
+    assert [d["id"] for d in provisional_decisions([a, repeated, conflict, other])] == ["other-metric"]
+    assert len(provisional_decisions([a, repeated])) == 1
 
 
 def test_identically_named_reports_keep_distinct_document_citations(settings):
@@ -298,6 +308,10 @@ def test_export_preserves_template_and_blanks(settings, page, lang):
                     assert actual[cell.coordinate].value == cell.value
     assert wb.calculation.fullCalcOnLoad
     assert len(wb.worksheets[-1]["A"]) == 1 + len(CATALOG) * 6
+    draft = openpyxl.load_workbook(BytesIO(export_workbook(settings, [d], [], reviewed=False)))
+    expected = "Unreviewed" if lang == "en" else "Μη ελεγμένο"
+    assert expected in [r[3].value for r in draft.worksheets[-1].iter_rows(min_row=2)]
+    assert ("DRAFT" if lang == "en" else "ΠΡΟΣΧΕΔΙΟ") in draft.worksheets[0]["K7"].value
 
 
 def test_formula_injection_and_zero(settings):
@@ -494,6 +508,17 @@ def test_worker_pdf_to_ready_without_network(tmp_path, monkeypatch, settings):
         assert any(hit["page"] == 2 for hit in client.get(
             f"/api/jobs/{job['id']}/search", params={"q": "revenue"}).json()["items"])
         assert client.get(f"/api/jobs/{job['id']}/audit").json()["statement_evidence"][0]["rows"]
+        assert client.get(f"/api/jobs/{job['id']}/workbook").status_code == 409
+        draft_response = client.get(f"/api/jobs/{job['id']}/workbook?language=en&draft=true")
+        assert draft_response.status_code == 200
+        assert f"financial-draft-en-2025-{job['id'][:8]}.xlsx" in draft_response.headers["content-disposition"]
+        draft_wb = openpyxl.load_workbook(BytesIO(draft_response.content))
+        assert draft_wb["Income Statement"]["I8"].value == .1
+        assert draft_wb["Income Statement"]["H8"].value == .09
+        statuses = [r[3].value for r in draft_wb["Export Review"].iter_rows(min_row=2)]
+        assert statuses.count("Unreviewed") == 2
+        assert "DRAFT" in draft_wb.worksheets[0]["K7"].value
+        assert client.put(f"/api/jobs/{job['id']}/review", json={"decisions": []}).status_code == 422
         assert client.get(
             f"/api/jobs/{job['id']}/documents/{c['document_id']}"
         ).content.startswith(b"%PDF-")
@@ -516,6 +541,7 @@ def test_worker_pdf_to_ready_without_network(tmp_path, monkeypatch, settings):
             BytesIO(client.get(f"/api/jobs/{job['id']}/workbook").content)
         )
         assert wb["Income Statement"]["I8"].value == 0.1
+        assert "DRAFT" not in wb.worksheets[0]["K7"].value
 
 
 def test_question_isolation(client, settings, page, monkeypatch):
@@ -609,6 +635,19 @@ def test_real_annual_report_statement_columns_and_grounding(settings):
     assert all(c["scope"] == "consolidated" for c in candidates)
     assert all("trade and other" not in c["row_label"].lower()
                for c in candidates if c["metric_id"] in ("balance_sheet_10", "balance_sheet_31"))
+
+
+@pytest.mark.skipif(not os.getenv("WORKBENCH_EVIDENCE_JSON"), reason="Requires a local evidence export")
+def test_user_evidence_can_produce_nonempty_draft():
+    source = json.loads(Path(os.environ["WORKBENCH_EVIDENCE_JSON"]).read_text(encoding="utf-8"))
+    assert source["status"] == "review" and source["decisions"] == []
+    selected = provisional_decisions(source["candidates"])
+    assert len(selected) > 100
+    settings = Settings(**source["settings"])
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(settings, selected, [], reviewed=False)))
+    assert wb["Income Statement"]["I8"].value == 11482.478
+    assert wb["Balance Sheet"]["I29"].value == 8039.778
+    assert sum(row[3].value == "Unreviewed" for row in wb["Export Review"].iter_rows(min_row=2)) == len(selected)
 
 
 def test_restart_marks_inflight_failed(tmp_path, monkeypatch, settings):

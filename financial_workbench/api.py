@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
 from .documents import read_pdf, statement_plan
-from .engine import CATALOG, METRICS, extract, mapping_tasks, reconcile
+from .engine import CATALOG, METRICS, extract, mapping_tasks, provisional_decisions, reconcile
 from .llm import ProviderError, completion
 from .models import Question, Review, Settings
 from .store import Store
@@ -286,6 +286,8 @@ def create_app(root=None, start_worker=True):
         job = get_job(job_id)
         if job["status"] not in ("review", "ready"):
             raise HTTPException(409, "Extraction must finish first.")
+        if not payload.decisions:
+            raise HTTPException(422, "Select at least one candidate or enter a sourced manual value before saving. Use Draft Excel to preview unreviewed figures.")
         settings = Settings(**job["settings"])
         candidates = {c["id"]: c for c in job["candidates"]}
         decisions, seen = [], set()
@@ -336,23 +338,30 @@ def create_app(root=None, start_worker=True):
         return public(job)
 
     @app.get("/api/jobs/{job_id}/workbook", dependencies=auth)
-    def download(job_id: str, language: str | None = None):
+    def download(job_id: str, language: str | None = None, draft: bool = False):
         job = get_job(job_id)
-        if job["status"] != "ready":
-            raise HTTPException(
-                409, "Review and save the selected inputs before exporting."
-            )
+        if draft:
+            if job["status"] not in ("review", "ready"):
+                raise HTTPException(409, "Wait for extraction before downloading a draft.")
+            decisions = provisional_decisions(job["candidates"])
+            if not decisions:
+                raise HTTPException(409, "No nonconflicting figures are available for a draft workbook.")
+        else:
+            if job["status"] != "ready" or not job["decisions"]:
+                raise HTTPException(409, "Select and save at least one reviewed input before exporting. Use Draft Excel to preview extracted figures.")
+            decisions = job["decisions"]
         if language is not None and language not in ("en", "el"):
             raise HTTPException(422, "Language must be en or el.")
         settings = Settings(
             **(job["settings"] | ({"language": language} if language else {}))
         )
-        data = export_workbook(settings, job["decisions"], job["checks"])
+        data = export_workbook(settings, decisions, job["checks"] if not draft else [], reviewed=not draft)
+        kind = "draft" if draft else "analysis"
         return Response(
             data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": f'attachment; filename="financial-analysis-{settings.language}-{settings.latest_year}.xlsx"'
+                "Content-Disposition": f'attachment; filename="financial-{kind}-{settings.language}-{settings.latest_year}-{job_id[:8]}.xlsx"'
             },
         )
 
@@ -373,7 +382,7 @@ def create_app(root=None, start_worker=True):
             json.dumps(job, ensure_ascii=False, indent=2),
             media_type="application/json",
             headers={
-                "Content-Disposition": 'attachment; filename="financial-evidence.json"'
+                "Content-Disposition": f'attachment; filename="financial-evidence-{job_id[:8]}.json"'
             },
         )
 
