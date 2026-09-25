@@ -26,12 +26,12 @@ FINANCIAL_TERMS = (
 )
 PRIMARY_STATEMENT_TERMS = FINANCIAL_TERMS[:5]
 NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\(?-?\d{1,3}(?:[,. ]\d{3})+(?:[,.]\d+)?\)?|\(?-?\d+[,.]\d+\)?)")
-DATE_PATTERN = re.compile(r"(?:\d{1,2}/\d{1,2}-)?\d{1,2}/\d{1,2}/\d{2,4}$")
+DATE_PATTERN = re.compile(r"(?:\d{1,2}[./]\d{1,2}[./]-?)?\d{1,2}[./]\d{1,2}[./]\d{2,4}$")
 YEAR_COLUMN = re.compile(r"20\d{2}(?:\([a-d]\))?", re.I)
 AMOUNT_PATTERN = re.compile(r"(?:\(?[+\-−]?\d[\d.,]*\)?|0)$")
 STATEMENT_TITLES = (
-    ("income", re.compile(r"^\s*(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of (?:profit or loss|comprehensive income|income)|income statement)\b", re.I | re.M)),
-    ("balance", re.compile(r"^\s*(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of financial position|balance sheet)\b", re.I | re.M)),
+    ("income", re.compile(r"^\s*(?:\d{1,2}[.)]\s*)?(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of (?:profit or loss|comprehensive income|income)|income statement)\b", re.I | re.M)),
+    ("balance", re.compile(r"^\s*(?:\d{1,2}[.)]\s*)?(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of financial position|balance sheet)\b", re.I | re.M)),
     ("equity", re.compile(r"^\s*(?:consolidated\s+)?statement of changes in equity\b", re.I | re.M)),
     ("cash", re.compile(r"^\s*(?:consolidated\s+)?(?:statement of cash flows|cash flow statement)\b", re.I | re.M)),
 )
@@ -147,7 +147,7 @@ def _unit(text):
         scale = 1000
     elif re.search(r"(?:millions?|\bmn\b|€\s?m\b|εκατομμύρ)", opening):
         scale = 1000000
-    elif re.search(r"\b(in|amounts? in)\s+(?:euros?|eur|usd|gbp)\b", opening):
+    elif re.search(r"\b(?:in|amounts?\s*in)\s*(?:euros?|eur|usd|gbp)\b", opening):
         scale = 1
     else:
         return None
@@ -165,7 +165,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
         words = line["words"]
         label_words = sorted((word for word in words if word[0] < first), key=lambda w: (w[1], w[0]))
         label = " ".join(word[4] for word in label_words).strip()
-        numbers = [word for word in words if word[0] >= first and AMOUNT_PATTERN.fullmatch(word[4])]
+        numbers = [word for word in words if word[0] >= first and (AMOUNT_PATTERN.fullmatch(word[4]) or word[4] in ("-", "–", "—"))]
         if not numbers:
             if label and any(key in label.casefold() for key in (
                 "current assets", "current liabilities", "non-current assets",
@@ -178,7 +178,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
         if len(numbers) != len(headers) or (not include_unlabelled and not re.search(r"[^\W\d_]", label)):
             continue
         # Note references occupy the narrow gap just before the amount columns.
-        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:,\d+)?", label_words[-1][4]):
+        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:[.,]\d+)?[a-z]?", label_words[-1][4], re.I):
             label = " ".join(word[4] for word in label_words[:-1]).strip()
         values = []
         for header, word in zip(headers, numbers):
@@ -217,9 +217,13 @@ def _annotate_statements(pages):
         for panel in page["panels"]:
             text = panel["text"]
             note_heading = re.search(r"\bnotes\s+to\s+(?:the\s+)?(?:consolidated\s+)?financial\s+statements\b", text[:500], re.I)
-            if "contents" in text[:200].casefold() or (seen_statements and note_heading):
+            numbered_notes = re.search(
+                r"(?m)^\s*(?:5\.\s+General information|6\.\s+Basis of preparation|7\.\s+Detailed data)",
+                text[:650], re.I
+            )
+            if "contents" in text[:200].casefold() or (seen_statements and (note_heading or numbered_notes)):
                 active = None
-            if seen_statements and note_heading:
+            if seen_statements and (note_heading or numbered_notes):
                 in_notes = True
             heading = _statement_title(text)
             if heading and not in_notes:
@@ -247,7 +251,7 @@ def _annotate_statements(pages):
                     note_panel = {"side": panel["side"], "statement": "note",
                                   "currency": unit[0], "scale": unit[1]}
                     titles = [(line["y"], " ".join(w[4] for w in line["words"]))
-                              for line in lines if re.match(r"^\s*\d{1,2}\.\s+[A-Za-zΑ-Ωα-ω]",
+                              for line in lines if re.match(r"^\s*\d{1,2}(?:\.\d{1,2}[a-z]?)?\.?\s+[A-Za-zΑ-Ωα-ω]",
                                                      " ".join(w[4] for w in line["words"]))]
                     panel["note_rows"] = _table_rows(lines, headers, note_panel, page,
                                                        include_unlabelled=True)
