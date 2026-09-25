@@ -911,3 +911,48 @@ def test_provider_retry_delay_parses_daily_limit_window():
             }
 
     assert retry_delay(FakeResponse(), 0) == pytest.approx(223.048)
+
+
+def test_dotted_dates_numbered_titles_and_issuer_units():
+    from financial_workbench.documents import _statement_title, _unit, _year
+    assert _year("31.12.2025") == 2025
+    assert _statement_title("Annual Financial Report\n1.  Statement of Financial Position") == "balance"
+    assert _statement_title("Annual Financial Report\n2.  Statement of Comprehensive Income") == "income"
+    assert _unit("Annual Financial Report\n(AmountsinEuro) GROUP COMPANY") == ("EUR", 1)
+
+
+def test_aktor_2025_primary_statements_and_note_bridges():
+    """Optional real-PDF regression: run with WORKBENCH_AKTOR_PDF=/path/to/report.pdf."""
+    pdf = os.environ.get("WORKBENCH_AKTOR_PDF")
+    if not pdf:
+        pytest.skip("Set WORKBENCH_AKTOR_PDF to AKTOR's 306-page FY2025 annual report")
+    pages, _ = read_pdf(Path(pdf), Path(pdf).name)
+    assert len(pages) == 306
+    panels, batches = statement_plan(pages)
+    assert panels and batches
+    balance = [p for p in panels if p["page"] == 208 and p["statement"] == "balance"]
+    income = [p for p in panels if p["page"] == 209 and p["statement"] == "income"]
+    assert balance and income
+    notes = [r for p in pages for x in p["panels"] for r in x.get("note_rows", [])
+             if p["page"] == 264]
+    assert any(r["label"].strip() == "Final trade receivables" for r in notes)
+    async def no_model(messages, **kwargs):
+        return '{"mappings":[]}'
+    settings = Settings(company="AKTOR", latest_year=2025)
+    facts, _ = asyncio.run(extract(pages, settings, lambda *_: None,
+                                   complete=no_model, plan=(panels, batches)))
+    for metric, amount in (("balance_sheet_8", "268.681474"),
+                           ("balance_sheet_17", "1504.190595"),
+                           ("balance_sheet_37", "1243.781966"),
+                           ("income_statement_8", "1394.998664"),
+                           ("income_statement_16", "72.650399")):
+        assert amount in [c["value"] for c in facts
+                          if c["metric_id"] == metric and c["year"] == 2025]
+    added, _ = enrich_financial_evidence(pages, settings)
+    assert any(c["metric_id"] == "balance_sheet_10" and
+               c["year"] == 2025 and c["value"] == "254.775833" for c in added)
+    assert any(c["metric_id"] == "income_statement_22" and
+               c["year"] == 2025 and c["value"] == "39.035163" for c in added)
+    book = export_workbook(settings, provisional_decisions(facts + added), [],
+                           reviewed=False)
+    assert book.startswith(b"PK")
