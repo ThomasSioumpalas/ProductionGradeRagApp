@@ -14,22 +14,28 @@ METRICS = {m["id"]: m for m in CATALOG}
 # other labels to metric IDs, but never supplies a value, year, scope, or unit.
 ALIASES = {
     "income": {
-        "revenue": "income_statement_8", "cost of sales": "income_statement_9",
+        "revenue": "income_statement_8", "sales": "income_statement_8",
+        "cost of sales": "income_statement_9", "cost of goods sold": "income_statement_9",
         "turnover": "income_statement_8", "net sales": "income_statement_8",
         "gross profit loss": "income_statement_10",
         "gross profit": "income_statement_10",
         "distribution expenses": "income_statement_11",
         "administrative expenses": "income_statement_12",
         "profit from operations": "income_statement_16", "operating profit": "income_statement_16",
+        "operating results": "income_statement_16",
         "finance income": "income_statement_20", "finance cost": "income_statement_21",
+        "finance expenses": "income_statement_21",
         "profit before tax": "income_statement_25", "profit before taxation": "income_statement_25",
         "income taxes": "income_statement_26", "taxation": "income_statement_26",
+        "income tax expense": "income_statement_26",
         "profit after tax": "income_statement_28",
+        "profit losses net of taxes": "income_statement_28",
     },
     "balance": {
         "cash and cash equivalents": "balance_sheet_8",
         "inventories": "balance_sheet_11", "goodwill": "balance_sheet_21",
         "other intangible assets": "balance_sheet_22",
+        "intangible assets": "balance_sheet_22",
         "property plant and equipment": "balance_sheet_19",
         "right of use assets": "balance_sheet_20",
         "deferred tax assets": "balance_sheet_26",
@@ -84,12 +90,12 @@ def _alias(row):
             return "income_statement_30"
     if row["statement"] == "balance":
         section = _label(row.get("section", ""))
-        if label == "borrowings":
+        if label in ("borrowings", "bank and bond loans"):
             if "non current liabilities" in section:
                 return "balance_sheet_39"
             if "current liabilities" in section:
                 return "balance_sheet_32"
-        if label == "lease liabilities":
+        if label in ("lease liabilities", "lease financial liability"):
             if "non current liabilities" in section:
                 return "balance_sheet_40"
             if "current liabilities" in section:
@@ -248,6 +254,8 @@ def _candidates_from_row(row, metric_id, source, pages_by_source, settings, reje
                          "reason": "Combined or context-dependent row does not prove this metric"})
         return candidates
     for value in row["values"]:
+        if value["raw_value"].strip() in ("-", "–", "—"):
+            continue  # A dash is a missing printed amount, not a zero.
         if value["scope"] != settings.scope or not settings.latest_year - 5 <= value["year"] <= settings.latest_year:
             continue
         try:
