@@ -85,6 +85,23 @@ def _cf_depreciation(pages, settings):
 def _finance_cost(panels, settings):
     for _panel, rows in _source_rows(panels, "finance cost"):
         names = [_label(r["label"]) for r in rows]
+        aktor_interest = ("bank and bond loans", "lease liabilities",
+                          "interest on advances from customers",
+                          "interest on borrowings from third parties")
+        if all(names.count(name) == 1 for name in aktor_interest):
+            # This source explicitly separates interest-bearing items from
+            # letters of credit, FX, discount unwind and other finance fees.
+            selected = [rows[names.index(name)] for name in aktor_interest]
+            for year in range(settings.latest_year - 5, settings.latest_year + 1):
+                values = [_amount(row, settings.scope, year, settings) for row in selected]
+                if any(value is None for value in values):
+                    continue
+                if any(value > 0 for value in values):
+                    continue
+                yield _derived("income_statement_22", selected, settings, year,
+                               -sum(values),
+                               "Bank/bond + lease + customer-advance + third-party interest")
+            continue
         names = [name.removesuffix("*").strip() for name in names]
         parts = ("interest on borrowings", "interest on leases", "other interest expenses")
         all_parts = parts + ("realised losses from derivatives accounted at fvtpl",
@@ -110,6 +127,26 @@ def _finance_cost(panels, settings):
 
 def _trade_receivables(panels, settings):
     for _panel, rows in _source_rows(panels, "trade and other receivables"):
+        names = [_label(r["label"]) for r in rows]
+        for i in range(len(rows) - 3):
+            if names[i:i + 4] != ["trade receivables", "trade receivables related parties",
+                                    "less impairment provisions", "final trade receivables"]:
+                continue
+            components, reported = rows[i:i + 3], rows[i + 3]
+            for year in range(settings.latest_year - 5, settings.latest_year + 1):
+                values = [_amount(row, settings.scope, year, settings) for row in components]
+                subtotal = _amount(reported, settings.scope, year, settings)
+                if subtotal is None or any(value is None for value in values):
+                    continue
+                if sum(values) != subtotal:
+                    continue
+                yield _derived("balance_sheet_10", components + [reported], settings,
+                               year, subtotal,
+                               "Gross trade + related-party trade − impairment",
+                               check={"label": "Net trade receivables = printed final total",
+                                      "reported": str(subtotal),
+                                      "calculated": str(sum(values)),
+                                      "source": reported["quote"]})
         for i, row in enumerate(rows):
             if _label(row["label"]) != "trade receivables" or len(rows) < i + 4:
                 continue
@@ -134,9 +171,10 @@ def _trade_receivables(panels, settings):
 def _weighted_shares(panels, pages, settings):
     by_page = {(p["sha256"], p["page"]): p for p in pages}
     rejected = []
-    for _panel, rows in _source_rows(panels, "earnings per share"):
+    for _panel, rows in list(_source_rows(panels, "earnings per share")) + list(_source_rows(panels, "profit losses per share")):
         for row in rows:
-            if _label(row["label"]) != "weighted average number of ordinary shares for the purposes of basic earnings per share":
+            if _label(row["label"]) not in ("weighted average number of ordinary shares for the purposes of basic earnings per share",
+                                         "weighted average number of shares"):
                 continue
             if row["currency"] != settings.currency:
                 continue
@@ -172,8 +210,9 @@ def _direct_note_facts(pages, settings):
                                "short term investments") and (
                         "investment" in title or "financial asset" in title or "cash" in title):
                     metric = "balance_sheet_9"
-                elif label in ("basic earnings per share", "basic earnings per share eur") and (
-                        "earnings per share" in title):
+                elif label in ("basic earnings per share", "basic earnings per share eur",
+                               "basic profit losses per share") and (
+                        "earnings per share" in title or "profit losses per share" in title):
                     metric = "market_inputs_10"
                 if metric:
                     rejected = []
@@ -242,8 +281,8 @@ def _reported_net_debt(panels, settings):
 def enrich_financial_evidence(pages, settings, search=None):
     """Query the persistent page index and validate only matched note panels."""
     cf = list(_cf_depreciation(pages, settings))
-    finance = list(_finance_cost(_panels_for(pages, search, "interest borrowings finance"), settings))
-    trade = list(_trade_receivables(_panels_for(pages, search, "trade receivables allowance"), settings))
+    finance = list(_finance_cost(_panels_for(pages, search, "finance cost"), settings))
+    trade = list(_trade_receivables(_panels_for(pages, search, "trade receivables"), settings))
     shares = list(_weighted_shares(_panels_for(pages, search, "weighted average ordinary shares"), pages, settings))
     direct = list(_direct_note_facts(pages, settings))
     narrative = list(_narrative(_panels_for(pages, search, "closing price share")
