@@ -63,6 +63,9 @@ class Store:
                 for row in panel.get("rows", []):
                     records.append((job_id, page["sha256"], page["file"], page["page"],
                                     panel["side"], "row", row["label"] + " " + row["quote"]))
+                for row in panel.get("note_rows", []):
+                    records.append((job_id, page["sha256"], page["file"], page["page"],
+                                    panel["side"], "note_row", row["note_title"] + " " + row["quote"]))
         with self.connect() as c:
             c.execute("DELETE FROM evidence WHERE job_id=?", (job_id,))
             c.executemany(
@@ -74,7 +77,7 @@ class Store:
         with self.connect() as c:
             return c.execute("SELECT 1 FROM evidence WHERE job_id=? LIMIT 1", (job_id,)).fetchone() is not None
 
-    def search(self, job_id, query, limit=8):
+    def search(self, job_id, query, limit=8, all_terms=False):
         # Quote all terms before they reach FTS MATCH. The query is data, never
         # SQLite FTS syntax, and the job ID is enforced in the same SQL query.
         terms = re.findall(r"[^\W_]+", query.casefold(), flags=re.UNICODE)[:12]
@@ -84,11 +87,15 @@ class Store:
         stopwords = {"what", "was", "were", "the", "a", "an", "for", "in", "of", "is",
                      "and", "how", "much", "did", "company", "year", "το", "τα", "της",
                      "για", "και", "ποιο", "πόσο"}
+        # Synonyms are alternatives for exploratory search. Requiring both a
+        # printed term and its synonym makes exact gap investigations miss it.
         words = list(dict.fromkeys([t for t in terms if t not in stopwords]
-                                   + [aliases[t] for t in terms if t in aliases]))
+                                   + ([] if all_terms else [aliases[t] for t in terms if t in aliases])))
         if not words:
             return []
-        expression = " OR ".join('"' + word.replace('"', '""') + '"' for word in words)
+        expression = (" AND " if all_terms else " OR ").join(
+            '"' + word.replace('"', '""') + '"' for word in words
+        )
         with self.connect() as c:
             rows = c.execute(
                 "SELECT document_id,file,page,side,kind,"

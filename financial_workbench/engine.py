@@ -15,13 +15,16 @@ METRICS = {m["id"]: m for m in CATALOG}
 ALIASES = {
     "income": {
         "revenue": "income_statement_8", "cost of sales": "income_statement_9",
+        "turnover": "income_statement_8", "net sales": "income_statement_8",
         "gross profit loss": "income_statement_10",
+        "gross profit": "income_statement_10",
         "distribution expenses": "income_statement_11",
         "administrative expenses": "income_statement_12",
-        "profit from operations": "income_statement_16",
+        "profit from operations": "income_statement_16", "operating profit": "income_statement_16",
         "finance income": "income_statement_20", "finance cost": "income_statement_21",
-        "profit before tax": "income_statement_25",
-        "income taxes": "income_statement_26", "profit after tax": "income_statement_28",
+        "profit before tax": "income_statement_25", "profit before taxation": "income_statement_25",
+        "income taxes": "income_statement_26", "taxation": "income_statement_26",
+        "profit after tax": "income_statement_28",
     },
     "balance": {
         "cash and cash equivalents": "balance_sheet_8",
@@ -67,6 +70,13 @@ def _label(text):
 
 def _alias(row):
     label = _label(row["label"])
+    if row["statement"] == "balance":
+        # Balance sheets frequently print an adjacent note reference (17A,
+        # 6B) after an otherwise exact line-item name. Strip only a single
+        # short reference when the remaining name is an allowlisted label.
+        without_reference = re.sub(r"\s+\d{1,2}\s*[a-z]?$", "", label)
+        if without_reference in ALIASES["balance"]:
+            label = without_reference
     if row["statement"] == "income" and "profit after tax" in _label(row.get("section", "")):
         if label == "attributable to company shareholders":
             return "income_statement_29"
@@ -106,10 +116,25 @@ def _meaning_allowed(row, metric_id):
         "balance_sheet_10", "balance_sheet_16", "balance_sheet_31", "balance_sheet_36"
     ):
         return False
+    if metric_id == "income_statement_21" and label.startswith("net finance"):
+        return False
     if label == "attributable to company shareholders" and metric_id == "income_statement_29":
         return "profit after tax" in section
     if label == "non controlling interest" and metric_id == "income_statement_30":
         return "profit after tax" in section
+    # These targets represent an aggregate or a cash payment. An individual
+    # depreciation, financing-cost or share-transaction line is not that total.
+    if metric_id == "cash_flow_statement_9" and not (
+        "total" in label and "depreciation" in label
+    ):
+        return False
+    if metric_id == "cash_flow_statement_15" and "paid" not in label:
+        return False
+    if metric_id in ("cash_flow_statement_10", "cash_flow_statement_17",
+                     "cash_flow_statement_29", "cash_flow_statement_30") and not (
+        label.startswith("total ") or label.startswith("net ")
+    ):
+        return False
     return True
 
 
@@ -226,13 +251,15 @@ def _candidates_from_row(row, metric_id, source, pages_by_source, settings, reje
         if value["scope"] != settings.scope or not settings.latest_year - 5 <= value["year"] <= settings.latest_year:
             continue
         try:
-            if metric["unit"] not in ("money", "per_share"):
+            if metric["unit"] not in ("money", "per_share") and not (
+                metric["unit"] == "shares" and row["statement"] == "note"
+            ):
                 raise ValueError("Statement currency units cannot prove share counts or analyst inputs")
             fact = ExtractedFact(
                 metric_id=metric_id, year=value["year"], scope=value["scope"],
                 currency=row["currency"], raw_value=value["raw_value"],
                 decimal_separator=_separator(value["raw_value"]),
-                scale=1 if metric["unit"] == "per_share" else row["scale"],
+                scale=1 if metric["unit"] in ("per_share", "shares") else row["scale"],
                 source_file=row["file"], page=row["page"],
                 quote=row["quote"], context_quote=value["header"],
             )

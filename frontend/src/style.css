@@ -1,7 +1,7 @@
 :root {
-  font-family: Inter, Arial, sans-serif;
-  color: #253c37;
-  background: #f5f6f3;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #193245;
+  background: #f1f5f7;
   font-synthesis: none;
 }
 * {
@@ -41,8 +41,8 @@ summary:focus-visible {
 }
 header {
   height: 84px;
-  border-bottom: 1px solid #e1e5dc;
-  background: #fff;
+  border-bottom: 1px solid #284658;
+  background: #102a3b;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -54,15 +54,15 @@ header {
   letter-spacing: -0.7px;
   font-weight: 800;
   text-decoration: none;
-  color: #193d32;
+  color: #f5fbf7;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 .brand-icon {
   border-radius: 9px;
-  background: #1c4a3d;
-  color: #dbf0cc;
+  background: #35bfa6;
+  color: #092e3a;
   width: 34px;
   height: 38px;
   display: grid;
@@ -70,7 +70,7 @@ header {
   font-size: 25px;
 }
 .languages {
-  background: #f0f3ee;
+  background: #234355;
   padding: 4px;
   border-radius: 10px;
   display: flex;
@@ -81,9 +81,11 @@ header {
   font-size: 13px;
   font-weight: 500;
   padding: 8px 13px;
+  color: #dcebe9;
 }
 .languages .active {
-  background: #fff;
+  background: #f5fafa;
+  color: #12374a;
   box-shadow: 0 1px 4px #173e3015;
 }
 main {
@@ -92,9 +94,12 @@ main {
   padding: 42px 28px 70px;
 }
 .hero {
-  margin-bottom: 36px;
-  max-width: 850px;
+  margin: -42px -28px 35px;
+  padding: 54px max(28px, calc((100vw - 1394px) / 2)) 61px;
+  color: #f6fffc;
+  background: radial-gradient(circle at 85% 20%, #216174 0%, #144151 32%, #102d40 80%);
 }
+.hero .eyebrow { color: #8ee7cf; }
 .eyebrow {
   font-size: 10px;
   font-weight: 800;
@@ -102,14 +107,14 @@ main {
   color: #64806a;
 }
 .hero h1 {
-  font-size: 42px;
+  font-size: clamp(32px, 4vw, 52px);
   line-height: 1.16;
   letter-spacing: -1.8px;
   font-weight: 500;
   margin: 17px 0;
 }
 .hero p {
-  color: #677560;
+  color: #c3d7d7;
   font-size: 15px;
   line-height: 1.7;
 }
@@ -121,11 +126,11 @@ main {
 }
 .panel {
   background: #fff;
-  border: 1px solid #e0e5dc;
-  border-radius: 13px;
+  border: 1px solid #dce7eb;
+  border-radius: 16px;
   padding: 25px;
   margin-bottom: 20px;
-  box-shadow: 0 4px 12px #2b443004;
+  box-shadow: 0 14px 38px #143c4b0a;
 }
 h2 {
   font-size: 20px;
@@ -210,12 +215,12 @@ textarea {
   color: #687c5e;
 }
 .primary {
-  background: #244e3e;
+  background: #106a72;
   color: #f7fbee;
-  border-color: #244e3e;
+  border-color: #106a72;
 }
 .primary:hover {
-  background: #173d2e;
+  background: #10515d;
 }
 .full {
   width: 100%;
@@ -363,9 +368,9 @@ textarea {
   margin-bottom: 20px;
 }
 .stats div {
-  border: 1px solid #dfe6d5;
+  border: 1px solid #d3e4e6;
   border-radius: 10px;
-  background: #eef3e5;
+  background: linear-gradient(135deg,#e8f8f5,#eef4f9);
   padding: 22px;
 }
 .stats b {
@@ -752,3 +757,57 @@ footer {
     flex-direction: column;
   }
 }
+.coverage-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.coverage-list details {
+  border: 1px solid var(--line, #d9e2e8);
+  border-radius: 0.6rem;
+  padding: 0.8rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.coverage-list summary {
+  cursor: pointer;
+}
+
+.coverage-list p {
+  margin: 0.55rem 0;
+}
+.audit-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.audit-strip span { background: #eaf4f5; border: 1px solid #d2e7e6; padding: 10px 13px; border-radius: 9px; font-size: 11px; }
+.audit-strip b { color: #0d6d70; font-size: 15px; margin-left: 5px; }
+.coverage-list details { background: #fafcfd; border-color: #dae7e8; }
+.coverage-list summary strong { color: #113e50; }
+.gap-finding { border-left: 3px solid #dfac61; background: #fff9f0; margin: 10px 0; padding: 10px 13px; border-radius: 3px 8px 8px 3px; font-size: 12px; }
+.gap-finding > small { display: block; line-height: 1.6; color: #886d44; }
+.lead { display: flex; text-align: left; width: 100%; flex-direction: column; gap: 5px; border-color: #d2e1df; background: #fff; margin-top: 8px; font-size: 11px; font-weight: 400; }
+.lead b { color: #066b70; }
+.lead span { color: #415761; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scenario-panel { background: linear-gradient(135deg, #fff 0%, #f4fafb 100%); }
+.scenario-panel > h3 { font-size: 23px; letter-spacing: -.6px; margin: 10px 0; }
+.scenario-panel > p { font-size: 12px; color: #516976; }
+.scenario-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 15px; align-items: end; padding: 16px; background: #edf6f6; border: 1px solid #d9e9ea; border-radius: 12px; margin: 18px 0; }
+.scenario-controls label { margin: 0; color: #255765; }
+.scenario-controls input { margin-bottom: 0; }
+.scenario-controls input[type=range] { accent-color: #149b9a; padding: 0; }
+.scenario-controls button { background: #155d69; border-color: #155d69; color: white; }
+.scenario-context { padding: 4px 0; }
+.scenario-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.scenario-card { background: #fff; border: 1px solid #d5e6e8; padding: 17px; border-radius: 12px; min-width: 0; }
+.scenario-card.base { border-top: 4px solid #168e91; }
+.scenario-card.downside { border-top: 4px solid #e2ad71; }
+.scenario-card.upside { border-top: 4px solid #70bba2; }
+.scenario-card > small { color: #486572; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; display:block; margin-bottom: 11px; }
+.scenario-card > b { display: block; font-size: 21px; color: #113c4c; margin-bottom: 16px; }
+.scenario-card em { font-style: normal; font-weight: 400; font-size: 10px; color: #65808d; }
+.scenario-year { display: flex; align-items: baseline; gap: 7px; padding: 8px 0; border-top: 1px solid #e6eff0; font-size: 11px; }
+.scenario-year strong { margin-left: auto; font-size: 14px; font-variant-numeric: tabular-nums; }
+.scenario-year small { color: #718591; font-size: 9px; }
+.scenario-sources { margin: 20px 0 0; font-size: 12px; }
+.scenario-sources summary { cursor:pointer; color: #0e696d; }
+.scenario-empty { border: 1px dashed #b9d2d5; border-radius: 10px; background: #f7fcfc; padding: 16px; color: #526b73; font-size: 12px; }
+@media (max-width: 1000px) { .scenario-controls { grid-template-columns: 1fr 1fr; } .scenario-controls button { grid-column: 1 / -1; } }
+@media (max-width: 720px) { .hero { margin: -30px -16px 25px; padding: 38px 16px; } .scenario-grid { grid-template-columns: 1fr; } .scenario-controls { grid-template-columns: 1fr; } .scenario-controls button { grid-column: auto; } .scenario-year strong { margin-left: auto; } }

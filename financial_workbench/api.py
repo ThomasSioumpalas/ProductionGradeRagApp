@@ -17,8 +17,12 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
+from .analysis import (check_reported_measures, enrich_financial_evidence,
+                       kpi_coverage, merge_evidence)
 from .documents import read_pdf, statement_plan
 from .engine import CATALOG, METRICS, extract, mapping_tasks, provisional_decisions, reconcile
+from .forecast import operating_scenarios
+from .investigation import investigate_gaps
 from .llm import ProviderError, completion
 from .models import Question, Review, Settings
 from .store import Store
@@ -80,10 +84,32 @@ async def worker(app):
                 job["progress"] = {"done": done, "total": total}
                 app.state.store.put(job)
 
-            candidates, rejected = await extract(
-                pages, Settings(**job["settings"]), progress, plan=extraction_plan_data
+            if panels:
+                candidates, rejected = await extract(
+                    pages, Settings(**job["settings"]), progress, plan=extraction_plan_data
+                )
+            else:
+                # Preserve the indexed corpus and potential note evidence
+                # even when an issuer's statement layout is unsupported.
+                candidates, rejected = [], []
+                job["warnings"].append(
+                    "No dated statement table could be parsed. Review financial note leads "
+                    "and the original PDF; run OCR if the statement pages are image-only."
+                )
+            settings = Settings(**job["settings"])
+            additions, reported = enrich_financial_evidence(
+                pages, settings, search=lambda q, **kw: app.state.store.search(job["id"], q, **kw)
             )
-            job.update(status="review", candidates=candidates, rejected=rejected)
+            candidates, _ = merge_evidence(candidates, additions)
+            checked = check_reported_measures(candidates, reported)
+            coverage = kpi_coverage(candidates, settings, checked)
+            job.update(status="review", candidates=candidates, rejected=rejected,
+                       reported_measures=reported,
+                       coverage=coverage,
+                       investigations=investigate_gaps(
+                           pages, coverage, settings,
+                           lambda q, **kw: app.state.store.search(job["id"], q, **kw)),
+                       scenarios=operating_scenarios(provisional_decisions(candidates), settings))
         except asyncio.CancelledError:
             job.update(
                 status="failed",
@@ -112,7 +138,7 @@ def create_app(root=None, start_worker=True):
         for job in app.state.store.all():
             if job.get("pages") and not app.state.store.has_index(job["id"]):
                 app.state.store.index_pages(job["id"], job["pages"])
-            if job["status"] == "extracting":
+            if job["status"] in ("extracting", "enriching"):
                 job.update(
                     status="failed",
                     error="Extraction interrupted by a restart. Retry the job.",
@@ -213,6 +239,10 @@ def create_app(root=None, start_worker=True):
                 "rejected": [],
                 "decisions": [],
                 "checks": [],
+                "reported_measures": [],
+                "coverage": [],
+                "investigations": [],
+                "scenarios": None,
                 "warnings": [],
                 "progress": {"done": 0, "total": 0},
                 "error": None,
@@ -242,6 +272,9 @@ def create_app(root=None, start_worker=True):
             decisions=[],
             checks=[],
             rejected=[],
+            coverage=[],
+            investigations=[],
+            scenarios=None,
             progress={"done": 0, "total": 0},
         )
         app.state.store.put(job)
@@ -250,7 +283,7 @@ def create_app(root=None, start_worker=True):
     @app.delete("/api/jobs/{job_id}", status_code=204, dependencies=auth)
     def delete(job_id: str):
         job = get_job(job_id)
-        if job["status"] in ("queued", "extracting"):
+        if job["status"] in ("queued", "extracting", "enriching"):
             raise HTTPException(409, "Wait for extraction to finish before deleting.")
         shutil.rmtree(app.state.store.root / job_id, ignore_errors=True)
         app.state.store.delete(job_id)
@@ -332,13 +365,15 @@ def create_app(root=None, start_worker=True):
                     422, "Select a candidate or provide a manual value."
                 )
         job.update(
-            decisions=decisions, checks=reconcile(decisions, settings), status="ready"
+            decisions=decisions, checks=reconcile(decisions, settings), status="ready",
+            scenarios=operating_scenarios(decisions, settings),
         )
         app.state.store.put(job)
         return public(job)
 
     @app.get("/api/jobs/{job_id}/workbook", dependencies=auth)
-    def download(job_id: str, language: str | None = None, draft: bool = False):
+    def download(job_id: str, language: str | None = None, draft: bool = False,
+                 shock_pp: Decimal = Decimal("5"), baseline_override: Decimal | None = None):
         job = get_job(job_id)
         if draft:
             if job["status"] not in ("review", "ready"):
@@ -355,7 +390,14 @@ def create_app(root=None, start_worker=True):
         settings = Settings(
             **(job["settings"] | ({"language": language} if language else {}))
         )
-        data = export_workbook(settings, decisions, job["checks"] if not draft else [], reviewed=not draft)
+        reconciled = check_reported_measures(decisions, [dict(r) for r in job.get("reported_measures", [])])
+        coverage = kpi_coverage(decisions, settings, reconciled)
+        try:
+            scenarios = operating_scenarios(decisions, settings, shock_pp, baseline_override)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        data = export_workbook(settings, decisions, job["checks"] if not draft else [],
+                               reviewed=not draft, coverage=coverage, scenarios=scenarios)
         kind = "draft" if draft else "analysis"
         return Response(
             data,
@@ -364,6 +406,19 @@ def create_app(root=None, start_worker=True):
                 "Content-Disposition": f'attachment; filename="financial-{kind}-{settings.language}-{settings.latest_year}-{job_id[:8]}.xlsx"'
             },
         )
+
+    @app.get("/api/jobs/{job_id}/forecast", dependencies=auth)
+    def forecast(job_id: str, shock_pp: Decimal = Decimal("5"),
+                 baseline_override: Decimal | None = None):
+        job = get_job(job_id)
+        if job["status"] not in ("review", "ready"):
+            raise HTTPException(409, "Wait for financial extraction first.")
+        settings = Settings(**job["settings"])
+        decisions = job["decisions"] if job["status"] == "ready" else provisional_decisions(job["candidates"])
+        try:
+            return operating_scenarios(decisions, settings, shock_pp, baseline_override)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.get("/api/jobs/{job_id}/audit", dependencies=auth)
     def audit(job_id: str):
@@ -377,6 +432,14 @@ def create_app(root=None, start_worker=True):
              "rows": panel["rows"]}
             for page in saved["pages"] for panel in page.get("panels", [])
             if panel.get("statement")
+        ]
+        job["note_evidence"] = [
+            {"file": page["file"], "document_id": page["sha256"],
+             "page": page["page"], "side": panel["side"],
+             "headers": panel.get("note_headers", []),
+             "rows": panel["note_rows"]}
+            for page in saved["pages"] for panel in page.get("panels", [])
+            if panel.get("note_rows")
         ]
         return Response(
             json.dumps(job, ensure_ascii=False, indent=2),
@@ -401,20 +464,76 @@ def create_app(root=None, start_worker=True):
             for panel in item.get("panels", []):
                 if side and panel["side"] != side:
                     continue
-                if page is None and not panel.get("statement"):
+                if page is None and not (panel.get("statement") or panel.get("note_rows")):
                     continue
                 data = {
                     "file": item["file"], "document_id": item["sha256"],
                     "page": item["page"], "side": panel["side"],
                     "statement": panel.get("statement"),
                     "row_count": len(panel.get("rows", [])),
+                    "note_count": len(panel.get("note_rows", [])),
                     "headers": panel.get("headers", []),
+                    "note_headers": panel.get("note_headers", []),
                     "currency": panel.get("currency"), "scale": panel.get("scale"),
                 }
                 if page is not None:
-                    data.update(text=panel["text"], rows=panel.get("rows", []))
+                    data.update(text=panel["text"], rows=panel.get("rows", []),
+                                note_rows=panel.get("note_rows", []))
                 items.append(data)
         return {"items": items}
+
+    @app.post("/api/jobs/{job_id}/refresh-evidence", dependencies=auth)
+    async def refresh_evidence(job_id: str):
+        """Re-read saved PDFs and notes without sending another Groq request."""
+        job = get_job(job_id)
+        if job["status"] not in ("review", "ready", "failed"):
+            raise HTTPException(409, "Wait for the running extraction to finish.")
+        if not job.get("files") or any(not Path(f["path"]).is_file() for f in job["files"]):
+            raise HTTPException(409, "Stored PDFs are missing. Upload the reports again.")
+        original_status = job["status"]
+        job["status"] = "enriching"
+        app.state.store.put(job)
+        try:
+            pages, warnings = [], []
+            for file in job["files"]:
+                p, w = await asyncio.to_thread(read_pdf, Path(file["path"]), file["name"], len(pages))
+                pages.extend(p)
+                warnings.extend(w)
+            app.state.store.index_pages(job_id, pages)
+            settings = Settings(**job["settings"])
+            added, reported = enrich_financial_evidence(
+                pages, settings, search=lambda q, **kw: app.state.store.search(job_id, q, **kw)
+            )
+            selected_ids = [d["id"] for d in job["decisions"] if d.get("id")]
+            candidates, invalid = merge_evidence(job["candidates"], added, selected_ids)
+            checked = check_reported_measures(candidates, reported)
+            coverage = kpi_coverage(candidates, settings, checked)
+            job.update(pages=pages, candidates=candidates, reported_measures=reported,
+                       coverage=coverage,
+                       investigations=investigate_gaps(
+                           pages, coverage, settings,
+                           lambda q, **kw: app.state.store.search(job_id, q, **kw)),
+                       scenarios=operating_scenarios(
+                           job["decisions"] if original_status == "ready" else provisional_decisions(candidates),
+                           settings),
+                       rejected=job["rejected"] + [
+                           {"file": c["file"], "page": c["page"], "row_label": c.get("row_label"),
+                            "metric_id": c["metric_id"],
+                            "reason": "Earlier model mapping was a component, not the requested total"}
+                           for c in invalid], warnings=job["warnings"] + warnings)
+        except (ValueError, OSError) as exc:
+            job["status"] = original_status
+            app.state.store.put(job)
+            raise HTTPException(422, str(exc)[:500]) from exc
+        except Exception as exc:
+            job["status"] = original_status
+            app.state.store.put(job)
+            log.exception("Evidence refresh failed for job %s", job_id)
+            raise HTTPException(500, "Evidence refresh failed. Check backend logs.") from exc
+        job["status"] = "review" if original_status == "failed" else original_status
+        job["error"] = None
+        app.state.store.put(job)
+        return public(job)
 
     @app.get("/api/jobs/{job_id}/search", dependencies=auth)
     def search(job_id: str, q: str):

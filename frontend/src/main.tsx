@@ -36,6 +36,29 @@ type Candidate = {
   row_label?: string;
   column_header?: string;
   mapping_source?: string;
+  formula?: string;
+  components?: { label: string; raw_value: string; file: string; page: number }[];
+  reconciliation?: { label: string; reported: string; calculated: string };
+};
+type Coverage = {
+  id: string; year: number; label: string; value: string | null; formula: string;
+  status: string; missing: { metric_id: string; label: string; year: number; reason: string }[];
+  ambiguous: { label: string; year: number }[];
+  inputs: { metric_id: string; year: number; value: string;
+    sources: { file: string; page: number; document_id: string; row_label?: string }[] }[];
+};
+type Investigation = {
+  metric_id: string; year: number; state: string; searched_pages: number;
+  unreadable_pages: number; queries: string[];
+  leads: { file: string; document_id: string; page: number; side: string;
+    kind: string; text: string; queries: string[] }[];
+};
+type Scenario = {
+  status: string; reason?: string; latest_year: number; shock_pp: string;
+  baseline_growth: string | null; operating_margin?: string | null;
+  assumption_source: string;
+  history: { year: number; revenue: string; file?: string; page?: number; document_id?: string }[];
+  scenario_rows: { name: string; year: number; growth: string; revenue: string; ebit: string | null }[];
 };
 type EvidencePanel = {
   file: string;
@@ -44,7 +67,9 @@ type EvidencePanel = {
   side: string;
   statement: string | null;
   row_count: number;
+  note_count: number;
   headers: { scope: string; year: number; header: string }[];
+  note_headers?: { scope: string; year: number; header: string }[];
   currency?: string;
   scale?: number;
   text?: string;
@@ -55,6 +80,8 @@ type EvidencePanel = {
     quote: string;
     values: { year: number; scope: string; header: string; raw_value: string }[];
   }[];
+  note_rows?: { row_id: string; label: string; note_title: string; quote: string;
+    values: { year: number; scope: string; header: string; raw_value: string }[] }[];
 };
 type SearchHit = { file: string; document_id: string; page: number; side: string; kind: string; text: string };
 type Decision = {
@@ -82,6 +109,9 @@ type Job = {
   rejected: { file: string; page: number; reason: string }[];
   progress: { done: number; total: number };
   error: string | null;
+  coverage?: Coverage[];
+  investigations?: Investigation[];
+  scenarios?: Scenario;
 };
 function App() {
   const [lang, setLang] = useState<Lang>("en"),
@@ -127,6 +157,9 @@ function App() {
   const [editing, setEditing] = useState<string | null>(null),
     [manual, setManual] = useState(""),
     [note, setNote] = useState("");
+  const [scenario, setScenario] = useState<Scenario | null>(null),
+    [spread, setSpread] = useState("5"),
+    [assumedGrowth, setAssumedGrowth] = useState("");
   async function api(path: string, init: RequestInit = {}) {
     const r = await fetch(`/api${path}`, {
       ...init,
@@ -165,6 +198,9 @@ function App() {
   }, [lang]);
   function load(j: Job) {
     setJob(j);
+    setScenario(j.scenarios || null);
+    setSpread("5");
+    setAssumedGrowth("");
     setYear(j.settings.latest_year);
     setDirty(false);
     setAnswer(null);
@@ -190,14 +226,15 @@ function App() {
     );
   }
   useEffect(() => {
-    if (!job || !["queued", "extracting"].includes(job.status)) return;
+    if (!job || !["queued", "extracting", "enriching"].includes(job.status)) return;
     let cancelled = false;
     const id = setInterval(async () => {
       try {
         const j = await (await api(`/jobs/${job.id}`)).json();
         if (!cancelled) {
           setJob(j);
-          if (!["queued", "extracting"].includes(j.status)) void refresh();
+          if (j.scenarios) setScenario(j.scenarios);
+          if (!["queued", "extracting", "enriching"].includes(j.status)) void refresh();
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -209,7 +246,7 @@ function App() {
     };
   }, [job?.id, job?.status, key]);
   useEffect(() => {
-    if (!job || ["queued", "extracting"].includes(job.status)) return;
+    if (!job || ["queued", "extracting", "enriching"].includes(job.status)) return;
     let cancelled = false;
     void api(`/jobs/${job.id}/evidence`)
       .then((r) => r.json())
@@ -254,12 +291,30 @@ function App() {
       await refresh();
     });
   }
+  async function recheckEvidence() {
+    if (!job) return;
+    await action(async () => {
+      const updated = await (await api(`/jobs/${job.id}/refresh-evidence`, { method: "POST" })).json();
+      load(updated);
+      setMessage(t.recheckDone);
+      await refresh();
+    });
+  }
+  async function previewScenario() {
+    if (!job) return;
+    await action(async () => {
+      const options = new URLSearchParams({ shock_pp: spread });
+      if (assumedGrowth.trim()) options.set("baseline_override", String(Number(assumedGrowth) / 100));
+      setScenario(await (await api(`/jobs/${job.id}/forecast?${options}`)).json());
+    });
+  }
   async function download(kind: "workbook" | "draft" | "audit") {
     if (!job) return;
     await action(async () => {
       const r = await api(
         kind === "audit" ? `/jobs/${job.id}/audit` :
-          `/jobs/${job.id}/workbook?language=${lang}${kind === "draft" ? "&draft=true" : ""}`,
+          `/jobs/${job.id}/workbook?language=${lang}${kind === "draft" ? "&draft=true" : ""}` +
+          `&shock_pp=${encodeURIComponent(spread)}${assumedGrowth.trim() ? `&baseline_override=${encodeURIComponent(Number(assumedGrowth) / 100)}` : ""}`,
       );
       const url = URL.createObjectURL(await r.blob());
       const a = document.createElement("a");
@@ -301,6 +356,7 @@ function App() {
     ({
       queued: t.queued,
       extracting: t.extracting,
+      enriching: t.enriching,
       ready: t.ready,
       failed: t.failed,
       review: t.reviewStatus,
@@ -459,7 +515,7 @@ function App() {
                 className="primary full"
                 disabled={
                   busy ||
-                  (!!job && ["queued", "extracting"].includes(job.status))
+                  (!!job && ["queued", "extracting", "enriching"].includes(job.status))
                 }
                 onClick={start}
               >
@@ -554,7 +610,7 @@ function App() {
                       {t.shares}: {job.settings.share_scale.toLocaleString()}
                     </small>
                   </div>
-                  {!["queued", "extracting"].includes(job.status) && (
+                  {!["queued", "extracting", "enriching"].includes(job.status) && (
                     <button
                       className="danger subtle"
                       disabled={busy}
@@ -572,7 +628,7 @@ function App() {
                     </button>
                   )}
                 </section>
-                {["queued", "extracting"].includes(job.status) && (
+                {["queued", "extracting", "enriching"].includes(job.status) && (
                   <section className="panel progress">
                     <h3>{status(job.status)}</h3>
                     <progress
@@ -605,7 +661,73 @@ function App() {
                     </button>
                   </section>
                 )}
-                {!['queued', 'extracting'].includes(job.status) && (
+                {["failed", "review", "ready"].includes(job.status) && (
+                  <section className="panel">
+                    <h3>{t.recheckTitle}</h3>
+                    <p>{t.recheckHelp}</p>
+                    <button className="subtle" disabled={busy} onClick={() => void recheckEvidence()}>{t.recheck}</button>
+                  </section>
+                )}
+                {job.coverage && job.coverage.length > 0 && (
+                  <section className="panel coverage-panel">
+                    <h3>{t.coverageTitle} · {year}</h3>
+                    <p>{t.coverageHelp}</p>
+                    <div className="audit-strip"><span>{t.indexedPages}: <b>{job.investigations?.[0]?.searched_pages ?? 0}</b></span><span>{t.unreadable}: <b>{job.investigations?.[0]?.unreadable_pages ?? 0}</b></span><span>{t.sourceLeads}: <b>{job.investigations?.filter(x => x.year === year && x.leads.length).length ?? 0}</b></span></div>
+                    <div className="coverage-list">
+                      {job.coverage.filter((item) => item.year === year).map((item) => (
+                        <details key={`${item.id}:${year}`}>
+                          <summary><strong>{item.label}</strong> · {item.status === "available"
+                            ? `${Number(item.value).toLocaleString(lang === 'el' ? 'el-GR' : 'en-GB', { maximumFractionDigits: 4 })} ${t.availableInputs}`
+                            : item.status === 'ambiguous' ? t.conflict : t.missing}</summary>
+                          <p>{item.formula}</p>
+                          {item.missing.map((missing, i) => {
+                            const investigation = job.investigations?.find(x => x.metric_id === missing.metric_id && x.year === missing.year);
+                            return <div className="gap-finding" key={i}>
+                              <strong>{missing.label} · {missing.year}</strong><p>{missing.reason}</p>
+                              {investigation && <>
+                                <small>{investigation.state === 'related_evidence_needs_review' ? t.leadsReview : investigation.state === 'low_text_pages_need_review' ? t.ocrWarning : t.noIndexedMatch} · {investigation.searched_pages} {t.pagesSearched}</small>
+                                {investigation.leads.map((lead, index) => <button className="lead" key={`${lead.document_id}:${lead.page}:${index}`} onClick={() => void openDoc(lead.document_id, lead.page)}>
+                                  <b>{lead.file} · p.{lead.page} ↗</b><span>{lead.text.slice(0, 220)}</span>
+                                </button>)}
+                              </>}
+                            </div>;
+                          })}
+                          {item.ambiguous.map((ambiguous, i) => <p key={i}>{t.conflict}: {ambiguous.label} ({ambiguous.year})</p>)}
+                          {item.inputs.map((input, i) => <p key={i}>{input.metric_id} ({input.year}): {input.value} · {input.sources.map((src) => `${src.row_label ? `${src.row_label} · ` : ''}${src.file} p.${src.page}`).join('; ')}</p>)}
+                        </details>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {available && <section className="panel scenario-panel">
+                  <span className="eyebrow">{t.scenarioEyebrow}</span>
+                  <h3>{t.scenarioTitle}</h3>
+                  <p>{t.scenarioHelp}</p>
+                  <div className="scenario-controls">
+                    <label>{t.spread}: {spread} pp
+                      <input type="range" min="0" max="20" step="0.5" value={spread} onChange={e => setSpread(e.target.value)} />
+                    </label>
+                    <label>{t.assumedGrowth}
+                      <input type="number" min="-90" max="100" step="0.1" placeholder={t.historyMedian} value={assumedGrowth} onChange={e => setAssumedGrowth(e.target.value)} />
+                    </label>
+                    <button disabled={busy || dirty || (job.status === 'ready' && !job.decisions.length)} onClick={() => void previewScenario()}>{t.preview}</button>
+                  </div>
+                  {dirty && <p className="muted">{t.saveFirst}</p>}
+                  {scenario?.status === 'available' ? <>
+                    <p className="scenario-context">{scenario.assumption_source === 'analyst' ? t.analystAssumption : t.historyMedian}: <b>{(Number(scenario.baseline_growth) * 100).toFixed(2)}%</b> · {t.operatingMargin}: <b>{scenario.operating_margin === null ? t.missing : `${(Number(scenario.operating_margin) * 100).toFixed(2)}%`}</b></p>
+                    <div className="scenario-grid">{['downside', 'base', 'upside'].map(name => {
+                      const rows = scenario.scenario_rows.filter(row => row.name === name);
+                      return <div className={`scenario-card ${name}`} key={name}>
+                        <small>{name === 'downside' ? t.downside : name === 'base' ? t.base : t.upside}</small>
+                        <b>{(Number(rows[0]?.growth) * 100).toFixed(2)}% <em>{t.annualGrowth}</em></b>
+                        {rows.map(row => <div className="scenario-year" key={row.year}><span>{row.year}</span><strong>{Number(row.revenue).toLocaleString(lang === 'el' ? 'el-GR' : 'en-GB', {maximumFractionDigits: 2})}</strong><small>{t.revenue}</small></div>)}
+                      </div>;
+                    })}</div>
+                    <details className="scenario-sources"><summary>{t.scenarioSources}</summary>{scenario.history.map(item => <button className="lead" key={item.year} onClick={() => item.document_id && item.page && void openDoc(item.document_id, item.page)} disabled={!item.document_id || !item.page}>{item.year}: {Number(item.revenue).toLocaleString()} · {item.file || t.manual} p.{item.page ?? '—'}</button>)}</details>
+                  </> : <div className="scenario-empty">{scenario?.reason || t.scenarioUnavailable}</div>}
+                  <small className="disclosure">{t.scenarioDisclaimer}</small>
+                </section>}
+                {!['queued', 'extracting', 'enriching'].includes(job.status) && (
                   <section className="panel evidence-browser">
                     <h3>{t.reading}</h3>
                     <p>{t.readingHelp}</p>
@@ -616,7 +738,7 @@ function App() {
                           className="subtle"
                           onClick={() => void showEvidence(panel)}
                         >
-                          {panel.file} · p.{panel.page} {panel.side} · {panel.statement} · {panel.row_count} {t.rows}
+                          {panel.file} · p.{panel.page} {panel.side} · {panel.statement || t.noteRows} · {panel.row_count + panel.note_count} {t.rows}
                         </button>
                       ))}
                       {evidencePanels.length === 0 && <p>{t.noStatementPanels}</p>}
@@ -624,13 +746,20 @@ function App() {
                     {activeEvidence && (
                       <div className="parsed-panel">
                         <h4>{activeEvidence.statement || t.source} · p.{activeEvidence.page} {activeEvidence.side}</h4>
-                        <p>{activeEvidence.headers.map((h) => `${h.scope} ${h.header}`).join(' · ')} {activeEvidence.scale ? `· ${activeEvidence.currency} × ${activeEvidence.scale.toLocaleString()}` : ''}</p>
+                        <p>{(activeEvidence.headers.length ? activeEvidence.headers : activeEvidence.note_headers || []).map((h) => `${h.scope} ${h.header}`).join(' · ')} {activeEvidence.scale ? `· ${activeEvidence.currency} × ${activeEvidence.scale.toLocaleString()}` : ''}</p>
                         <button className="subtle" onClick={() => void openDoc(activeEvidence.document_id, activeEvidence.page)}>{t.open}</button>
                         <div className="parsed-rows">
                           {activeEvidence.rows?.map((row) => (
                             <div key={row.row_id}>
                               <b>{row.label}</b>
                               <small>{row.section}</small>
+                              <span>{row.values.map((v) => `${v.scope === 'consolidated' ? t.consolidated : t.standalone} ${v.year}: ${v.raw_value}`).join(' · ')}</span>
+                            </div>
+                          ))}
+                          {activeEvidence.note_rows?.map((row) => (
+                            <div key={row.row_id}>
+                              <b>{row.label || t.unlabelledSubtotal}</b>
+                              <small>{row.note_title}</small>
                               <span>{row.values.map((v) => `${v.scope === 'consolidated' ? t.consolidated : t.standalone} ${v.year}: ${v.raw_value}`).join(' · ')}</span>
                             </div>
                           ))}
@@ -824,11 +953,9 @@ function App() {
                                       </strong>
                                       <blockquote>{c.quote}</blockquote>
                                       <p>{c.context_quote}</p>
-                                      <small>
-                                        {c.raw_value} ×{" "}
-                                        {c.scale.toLocaleString()} → {c.value} (
-                                        {m.unit})
-                                      </small>
+                                      <small>{c.formula ? `${c.formula} → ${c.value} (${m.unit})` : `${c.raw_value} × ${c.scale.toLocaleString()} → ${c.value} (${m.unit})`}</small>
+                                      {c.components?.map((source, i) => <small key={i}>{source.label}: {source.raw_value} · {source.file} p.{source.page}</small>)}
+                                      {c.reconciliation && <small>{c.reconciliation.label}: {c.reconciliation.calculated} = {c.reconciliation.reported}</small>}
                                       {c.row_label && <small>{c.row_label} · {c.panel} · {c.column_header} · {c.mapping_source}</small>}
                                       <button
                                         className="subtle"
@@ -901,7 +1028,7 @@ function App() {
                                   }),
                                 })
                               ).json();
-                              setJob(j);
+                              load(j);
                               setDirty(false);
                               setMessage(t.saved);
                               await refresh();

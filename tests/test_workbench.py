@@ -11,6 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from financial_workbench.api import create_app
+from financial_workbench.analysis import (check_reported_measures, enrich_financial_evidence,
+                                          kpi_coverage, merge_evidence)
 from financial_workbench.documents import page_windows, read_pdf, statement_plan
 from financial_workbench.engine import (
     CATALOG,
@@ -25,6 +27,8 @@ from financial_workbench.engine import (
 from financial_workbench.models import ExtractedFact, Settings
 from financial_workbench.store import Store
 from financial_workbench.workbook import export_workbook
+from financial_workbench.forecast import operating_scenarios
+from financial_workbench.investigation import investigate_gaps
 
 
 @pytest.fixture
@@ -232,6 +236,99 @@ def test_pdf_and_page_chunks(tmp_path):
     d.close()
     with pytest.raises(ValueError, match="OCR"):
         read_pdf(blank, "scan.pdf")
+
+
+@pytest.mark.parametrize("pdf_env,expected_revenue,expected_operating,expected_page", [
+    ("WORKBENCH_UNILEVER_PDF", "50503", "9037", 131),
+    ("WORKBENCH_ADIDAS_PDF", "24811", "2056", 4),
+])
+def test_official_cross_company_statements_and_revenue_scenarios(
+        tmp_path, pdf_env, expected_revenue, expected_operating, expected_page):
+    """Real 2025 reports: varying year headers, layouts and page positions."""
+    if not os.environ.get(pdf_env):
+        pytest.skip(f"Set {pdf_env} to an official downloaded annual report")
+    path = Path(os.environ[pdf_env])
+    pages, _ = read_pdf(path, path.name)
+    panels, batches = statement_plan(pages)
+    assert panels and batches
+
+    async def mapping(messages, **_):
+        return '{"mappings":[]}'
+
+    values, rejected = asyncio.run(extract(pages, Settings(company="Unrelated spreadsheet label",
+        latest_year=2025), lambda *_: None, complete=mapping, plan=(panels, batches)))
+    assert not rejected
+    def selected(metric):
+        return [c for c in values if c["year"] == 2025 and c["metric_id"] == metric]
+    assert [(c["value"], c["page"]) for c in selected("income_statement_8")] == [
+        (expected_revenue, expected_page)]
+    assert [(c["value"], c["page"]) for c in selected("income_statement_16")] == [
+        (expected_operating, expected_page)]
+    if pdf_env == "WORKBENCH_UNILEVER_PDF":
+        assert len(pages) >= 280 and expected_page > len(pages) // 3
+        result = operating_scenarios(values, Settings(company="Excel only", latest_year=2025))
+        assert result["status"] == "available"
+        assert len(result["scenario_rows"]) == 9
+        assert result["history"][-1]["page"] == 131
+        book = openpyxl.load_workbook(BytesIO(export_workbook(
+            Settings(company="Excel only", latest_year=2025), values, [], scenarios=result)))
+        assert book["Scenarios"]["D7"].value == "=$D$4*(1+C7)^(B7-$B$4)"
+        assert book["Scenarios"]["D4"].value == 50503
+    else:
+        assert [(c["value"], c["page"]) for c in selected("balance_sheet_8")] == [("1617", 2)]
+        assert [(c["value"], c["page"]) for c in selected("balance_sheet_17")] == [("11977", 2)]
+        added, _ = enrich_financial_evidence(pages, Settings(company="Excel only", latest_year=2025))
+        assert [(c["value"], c["page"]) for c in added if c["metric_id"] == "income_statement_22"
+                and c["year"] == 2025] == [("227", 7)]
+        cover = kpi_coverage(values + added, Settings(company="Excel only", latest_year=2025))
+        assert next(c for c in cover if c["id"] == "interest_coverage" and c["year"] == 2025)["status"] == "available"
+        assert operating_scenarios(values, Settings(company="Excel only", latest_year=2025))["status"] == "insufficient_history"
+
+
+def test_gap_search_exposes_leads_without_guessing_missing_amounts(tmp_path, settings):
+    store = Store(tmp_path)
+    pages = [{"sha256": "b" * 64, "file": "filing.pdf", "page": page,
+              "text": f"2025 Liquid investments {page * 10}" if page == 7 else "2025 unrelated text",
+              "panels": [{"side": "full", "text": f"2025 Liquid investments {page * 10}"
+                          if page == 7 else "2025 unrelated text", "rows": [], "note_rows": [],
+                          "headers": [{"year": 2025}] if page == 7 else []}]}
+             for page in range(1, 10)]
+    store.index_pages("case", pages)
+    coverage = [{"missing": [{"metric_id": "balance_sheet_9", "year": 2025}], "ambiguous": []}]
+    results = investigate_gaps(pages, coverage, settings,
+                               lambda term, **kwargs: store.search("case", term, **kwargs))
+    entry = results[0]
+    assert entry["searched_pages"] == 9
+    assert entry["state"] == "related_evidence_needs_review"
+    assert entry["leads"][0]["page"] == 7
+    assert not entry.get("candidate")
+
+
+def test_forecast_requires_history_or_explicit_assumption(settings):
+    observations = [{"metric_id": "income_statement_8", "year": 2025,
+                     "value": "100", "file": "annual.pdf", "page": 5}]
+    assert operating_scenarios(observations, settings)["status"] == "insufficient_history"
+    projection = operating_scenarios(observations, settings, shock_pp=10,
+                                      baseline_override=Decimal("0.04"))
+    assert projection["status"] == "available"
+    assert projection["scenario_rows"][4]["revenue"] == "108.1600"
+    assert projection["scenario_rows"][4]["ebit"] is None
+    with pytest.raises(ValueError):
+        operating_scenarios(observations, settings, shock_pp=21)
+
+
+def test_adidas_financial_notes_remain_distinct_from_primary_statements():
+    path_text = os.environ.get("WORKBENCH_ADIDAS_NOTES_PDF")
+    if not path_text:
+        pytest.skip("Set WORKBENCH_ADIDAS_NOTES_PDF to the published notes")
+    path = Path(path_text)
+    pages, _ = read_pdf(path, path.name)
+    assert len(pages) > 100
+    assert not statement_plan(pages)[0]
+    note_rows = [row for page in pages for panel in page["panels"]
+                 for row in panel.get("note_rows", [])]
+    assert len(note_rows) >= 200
+    assert all(row["values"] and row["currency"] == "EUR" for row in note_rows)
 
 
 def test_financial_statements_at_the_end_are_not_dropped():
@@ -648,6 +745,97 @@ def test_user_evidence_can_produce_nonempty_draft():
     assert wb["Income Statement"]["I8"].value == 11482.478
     assert wb["Balance Sheet"]["I29"].value == 8039.778
     assert sum(row[3].value == "Unreviewed" for row in wb["Export Review"].iter_rows(min_row=2)) == len(selected)
+
+
+@pytest.mark.skipif(not os.getenv("WORKBENCH_REPORT_PDF") or not os.getenv("WORKBENCH_EVIDENCE_JSON"),
+                    reason="Requires the locally supplied annual report and evidence export")
+def test_supplied_json_recovers_note_values_and_preserves_distinct_kpi_definitions(tmp_path):
+    pdf = Path(os.environ["WORKBENCH_REPORT_PDF"])
+    supplied = json.loads(Path(os.environ["WORKBENCH_EVIDENCE_JSON"]).read_text(encoding="utf-8"))
+    pages, _ = read_pdf(pdf, pdf.name)
+    settings = Settings(**supplied["settings"])
+    store = Store(tmp_path)
+    store.index_pages(supplied["id"], pages)
+    additions, reported = enrich_financial_evidence(
+        pages, settings, search=lambda q, **kw: store.search(supplied["id"], q, **kw))
+    found = {(c["metric_id"], c["year"]): c for c in additions}
+    for metric, value, page in (
+        ("balance_sheet_10", "662.237", 155),
+        ("income_statement_17", "286.142", 128),
+        ("income_statement_22", "111.290", 145),
+        ("income_statement_18", "1059.348", 7),
+        ("market_inputs_7", "31.40", 9),
+        ("market_inputs_9", "108.315628", 146),
+    ):
+        assert (found[(metric, 2025)]["value"], found[(metric, 2025)]["page"]) == (value, page)
+    assert found[("income_statement_22", 2025)]["reconciliation"]["reported"] == "253.651"
+    assert found[("balance_sheet_10", 2025)]["reconciliation"]["reported"] == "662.237"
+    merged, removed = merge_evidence(supplied["candidates"], additions)
+    assert len(removed) >= 20
+    assert all(not (c["metric_id"] == "cash_flow_statement_15" and c["row_label"] == "Finance cost")
+               for c in merged)
+    checked = check_reported_measures(merged, reported)
+    assert len(checked) == 1 and checked[0]["reconciliation"]["calculated"] == "1579.448"
+    coverage = {c["id"]: c for c in kpi_coverage(merged, settings, checked) if c["year"] == 2025}
+    assert coverage["quick_ex_inventory"]["status"] == "available"
+    assert coverage["interest_coverage"]["value"] == str(Decimal("771.283") / Decimal("111.290"))
+    assert coverage["reported_net_debt_ebitda"]["value"] == str(Decimal("1579.448") / Decimal("1059.348"))
+    assert coverage["pe"]["value"] == str(Decimal("31.40") / Decimal("5.98"))
+    assert coverage["net_debt"]["status"] == "missing"
+    assert "balance_sheet_9" in [c["metric_id"] for c in coverage["net_debt"]["missing"]]
+    assert "market_inputs_17" in [c["metric_id"] for c in coverage["roic"]["missing"]]
+    selected = provisional_decisions(merged)
+    selected_measures = check_reported_measures(selected, [dict(m) for m in reported])
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(settings, selected, [], reviewed=False,
+        coverage=kpi_coverage(selected, settings, selected_measures))))
+    assert wb["Income Statement"]["I17"].value == 286.142
+    assert wb["Income Statement"]["I22"].value == 111.29
+    assert wb["Balance Sheet"]["I10"].value == 662.237
+    assert wb["Capital Calculations"]["I9"].data_type == "f"
+    evidence_sheet = wb["Evidence KPIs"]
+    ratio_row = next(r for r in evidence_sheet.iter_rows(min_row=2)
+                     if r[0].value == 2025 and r[1].value == "Reported net debt / reported EBITDA (issuer definition)")
+    assert ratio_row[2].value == f"=H{ratio_row[0].row}/I{ratio_row[0].row}"
+    assert (ratio_row[7].value, ratio_row[8].value) == (1579.448, 1059.348)
+    assert "p.42" in ratio_row[7].comment.text
+
+
+@pytest.mark.skipif(not os.getenv("WORKBENCH_REPORT_PDF") or not os.getenv("WORKBENCH_EVIDENCE_JSON"),
+                    reason="Requires the locally supplied annual report and evidence export")
+def test_recheck_saved_job_without_provider_or_reupload(tmp_path, monkeypatch):
+    pdf = Path(os.environ["WORKBENCH_REPORT_PDF"])
+    saved = json.loads(Path(os.environ["WORKBENCH_EVIDENCE_JSON"]).read_text(encoding="utf-8"))
+    saved.pop("statement_evidence", None)
+    saved["files"] = [{"name": pdf.name, "path": str(pdf)}]
+    saved["pages"] = []
+    previously_selected = saved["candidates"][0]
+    saved["decisions"] = [{**previously_selected, "manual": False, "note": "Previously reviewed"}]
+    saved["status"] = "ready"
+    import financial_workbench.api as workbench_api
+
+    async def no_provider(*_args, **_kwargs):
+        raise AssertionError("Refresh must not contact Groq")
+
+    monkeypatch.setattr(workbench_api, "completion", no_provider)
+    with TestClient(create_app(tmp_path, start_worker=False)) as client:
+        client.app.state.store.put(saved)
+        endpoint = f"/api/jobs/{saved['id']}/refresh-evidence"
+        first = client.post(endpoint)
+        assert first.status_code == 200, first.text
+        result = first.json()
+        assert result["status"] == "ready"
+        assert result["decisions"][0]["id"] == previously_selected["id"]
+        assert any(c["metric_id"] == "income_statement_22" and c["value"] == "111.290"
+                   for c in result["candidates"])
+        assert result["coverage"] and result["reported_measures"]
+        inspected = client.get(f"/api/jobs/{saved['id']}/evidence", params={"page": 145}).json()["items"]
+        assert any("interest on borrowings" in r["label"].lower()
+                   for panel in inspected for r in panel["note_rows"])
+        exported = client.get(f"/api/jobs/{saved['id']}/audit").json()
+        assert any(panel["page"] == 145 for panel in exported["note_evidence"])
+        again = client.post(endpoint)
+        assert again.status_code == 200, again.text
+        assert len(again.json()["candidates"]) == len(result["candidates"])
 
 
 def test_restart_marks_inflight_failed(tmp_path, monkeypatch, settings):

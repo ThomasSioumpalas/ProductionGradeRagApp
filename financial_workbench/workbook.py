@@ -5,7 +5,9 @@ from io import BytesIO
 from pathlib import Path
 
 import openpyxl
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.workbook.properties import CalcProperties
 
 from .engine import CATALOG, METRICS
@@ -17,7 +19,7 @@ def text(cell, value):
     cell.data_type = "s"
 
 
-def export_workbook(settings, decisions, checks, reviewed=True):
+def export_workbook(settings, decisions, checks, reviewed=True, coverage=(), scenarios=None):
     language = settings.language
     wb = openpyxl.load_workbook(
         Path(__file__).parent / "templates" / f"{language}.xlsx"
@@ -157,6 +159,10 @@ def export_workbook(settings, decisions, checks, reviewed=True):
             c.alignment = Alignment(vertical="top", wrap_text=True)
         row[2].number_format = "#,##0.00;[Red](#,##0.00)"
         audit.row_dimensions[row[0].row].height = 42
+    if coverage:
+        _add_evidence_kpis(wb, settings, coverage, reviewed)
+    if scenarios:
+        _add_scenarios(wb, scenarios, settings.language)
     # Excel/LibreOffice calculate the original formulas on opening. openpyxl does not evaluate formulas.
     wb.calculation = CalcProperties(
         calcId=0, fullCalcOnLoad=True, forceFullCalc=True, calcMode="auto"
@@ -164,3 +170,125 @@ def export_workbook(settings, decisions, checks, reviewed=True):
     output = BytesIO()
     wb.save(output)
     return output.getvalue()
+
+
+def _add_evidence_kpis(wb, settings, coverage, reviewed):
+    """Transparent ratio formulas with cited operands, separate from the template's definitions."""
+    el = settings.language == "el"
+    sheet = wb.create_sheet("Τεκμηριωμένοι Δείκτες" if el else "Evidence KPIs")
+    sheet.append(["Έτος" if el else "Year", "Δείκτης" if el else "KPI",
+                  "Τύπος Excel" if el else "Excel result", "Κατάσταση" if el else "Status",
+                  "Ορισμός" if el else "Definition", "Ελλείποντα" if el else "Missing dependencies",
+                  "Πηγές / ενδιάμεσα" if el else "Sources and operands"] +
+                 [f"{('Είσοδος' if el else 'Input')} {i}" for i in range(1, 17)])
+    for item in coverage:
+        row = sheet.max_row + 1
+        inputs = item["inputs"]
+        sources = []
+        for index, operand in enumerate(inputs, 8):
+            cell = sheet.cell(row, index, float(Decimal(operand["value"])))
+            refs = [f"{s.get('row_label', '')}: {s.get('file', '')} p.{s.get('page', '')}"
+                    for s in operand["sources"]]
+            note = f"{operand['metric_id']} · {operand['year']} · {'; '.join(refs)}"
+            cell.comment = Comment(note, "Financial Workbench")
+            sources.append(f"{operand['metric_id']} {operand['year']}: {operand['value']} · {'; '.join(refs)}")
+        cell = sheet.cell(row, 3)
+        if item["status"] == "available":
+            # Input cells contain only source values vetted in the review flow.
+            x = [f"{get_column_letter(i)}{row}" for i in range(8, 8 + len(inputs))]
+            expressions = {
+                "quick_liquid": lambda: f"({x[0]}+{x[1]}+{x[2]})/{x[3]}",
+                "quick_ex_inventory": lambda: f"({x[0]}-{x[1]})/{x[2]}",
+                "ebitda": lambda: f"{x[0]}+{x[1]}",
+                "interest_coverage": lambda: f"{x[0]}/{x[1]}",
+                "ebitda_coverage": lambda: f"({x[0]}+{x[1]})/{x[2]}",
+                "net_debt": lambda: f"SUM({','.join(x[:4])})-{x[4]}-{x[5]}",
+                "roic": lambda: (f"{x[0]}*(1-{x[1]})/((SUM({','.join(x[2:6])})+{x[6]}-{x[7]}-{x[8]}+"
+                                 f"SUM({','.join(x[9:13])})+{x[13]}-{x[14]}-{x[15]})/2)"),
+                "pe": lambda: f"{x[0]}/{x[1]}",
+                "reported_net_debt_ebitda": lambda: f"{x[0]}/{x[1]}",
+            }
+            cell.value = "=" + expressions[item["id"]]()
+            cell.number_format = '#,##0.0000;[Red](#,##0.0000)'
+        else:
+            text(cell, "n.a.")
+        sheet.cell(row, 1, item["year"])
+        text(sheet.cell(row, 2), item["label"])
+        text(sheet.cell(row, 4), (("Μη ελεγμένο" if el else "Unreviewed") if
+                                 item["status"] == "available" and not reviewed else item["status"]))
+        text(sheet.cell(row, 5), item["formula"])
+        text(sheet.cell(row, 6), "; ".join(f"{d['label']} ({d['year']}): {d['reason']}"
+                                                for d in item["missing"] + item["ambiguous"]))
+        text(sheet.cell(row, 7), "\n".join(sources))
+        sheet.row_dimensions[row].height = 46
+    sheet.freeze_panes = "C2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for col, width in {"A": 10, "B": 53, "C": 19, "D": 19, "E": 88, "F": 75, "G": 95}.items():
+        sheet.column_dimensions[col].width = width
+    for col in range(8, 24):
+        sheet.column_dimensions[get_column_letter(col)].width = 16
+    for cell in sheet[1]:
+        cell.fill = PatternFill("solid", fgColor="17365D")
+        cell.font = Font(color="FFFFFF", bold=True)
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row[:7]:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+
+def _add_scenarios(wb, scenarios, language):
+    el = language == "el"
+    sheet = wb.create_sheet("Σενάρια" if el else "Scenarios")
+    text(sheet["A1"], "Ενδεικτικά σενάρια εσόδων και EBIT" if el else "Illustrative revenue and EBIT scenarios")
+    text(sheet["A2"], "Ιστορική προβολή ή ρητή παραδοχή αναλυτή. Δεν είναι πρόβλεψη τιμής μετοχής."
+         if el else "Historical projection or explicit analyst assumption; no stock-price prediction.")
+    if scenarios["status"] != "available":
+        text(sheet["A4"], scenarios.get("reason", "Insufficient history"))
+        sheet.column_dimensions["A"].width = 95
+        return
+    headings = (("Σενάριο", "Έτος", "Βασική ανάπτυξη", "Τελευταία έσοδα",
+                 "Λειτουργικό περιθώριο", "Εύρος (ποσοστιαίες μονάδες)") if el else
+                ("Scenario", "Year", "Baseline growth", "Last revenue",
+                 "Operating margin", "Spread (percentage points)"))
+    for index, heading in enumerate(headings, 1):
+        text(sheet.cell(3, index), heading)
+    sheet["B4"] = scenarios["latest_year"]
+    sheet["C4"] = float(Decimal(scenarios["baseline_growth"]))
+    sheet["D4"] = float(Decimal(scenarios["history"][-1]["revenue"]))
+    if scenarios["operating_margin"] is not None:
+        sheet["E4"] = float(Decimal(scenarios["operating_margin"]))
+    sheet["F4"] = float(Decimal(scenarios["shock_pp"]) / 100)
+    text(sheet["A4"], ("Παραδοχή αναλυτή" if el else "Analyst") if scenarios["assumption_source"] == "analyst"
+         else ("Ιστορική διάμεσος" if el else "Historical median"))
+    output_headings = (("Σενάριο", "Οικονομικό έτος", "Ετήσια ανάπτυξη", "Έσοδα",
+                        "Λειτουργικά κέρδη (EBIT)", "Μέθοδος") if el else
+                       ("Scenario", "Fiscal year", "Annual growth", "Revenue",
+                        "Operating profit (EBIT)", "Method"))
+    for column, heading in enumerate(output_headings, 1):
+        text(sheet.cell(6, column), heading)
+    for item in scenarios["scenario_rows"]:
+        row = sheet.max_row + 1
+        text(sheet.cell(row, 1), ({"downside": "Δυσμενές", "base": "Βασικό", "upside": "Ευνοϊκό"}[item["name"]]
+             if el else item["name"].title()))
+        sheet.cell(row, 2, item["year"])
+        adjustment = {"downside": "-$F$4", "base": "", "upside": "+$F$4"}[item["name"]]
+        sheet.cell(row, 3, "=$C$4" + adjustment)
+        sheet.cell(row, 4, f"=$D$4*(1+C{row})^(B{row}-$B$4)")
+        sheet.cell(row, 5, f'=IF(ISNUMBER($E$4),D{row}*$E$4,"n.a.")')
+        text(sheet.cell(row, 6), ("Σταθερό τελευταίο λειτουργικό περιθώριο" if el else "Constant latest operating margin")
+             if scenarios["operating_margin"] is not None else
+             ("Το EBIT απαιτεί τεκμηριωμένα λειτουργικά κέρδη" if el else "EBIT requires sourced operating profit"))
+    base = sheet.max_row + 3
+    text(sheet.cell(base, 1), "Ιστορικά στοιχεία και σελίδες πρωτότυπου PDF" if el
+         else "Historical inputs and original PDF pages")
+    for index, item in enumerate(scenarios["history"], base + 1):
+        sheet.cell(index, 1, item["year"])
+        sheet.cell(index, 2, float(Decimal(item["revenue"])))
+        text(sheet.cell(index, 3), f"{item.get('file', '')} p.{item.get('page', '')}")
+        text(sheet.cell(index, 4), item.get("document_id") or "")
+    sheet.freeze_panes = "C7"
+    for column, width in {"A": 24, "B": 18, "C": 48, "D": 80, "E": 32, "F": 53}.items():
+        sheet.column_dimensions[column].width = width
+    for row in (3, 6):
+        for cell in sheet[row]:
+            cell.fill = PatternFill("solid", fgColor="17365D")
+            cell.font = Font(color="FFFFFF", bold=True)
