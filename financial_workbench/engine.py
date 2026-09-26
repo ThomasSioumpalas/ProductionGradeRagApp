@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -14,22 +15,28 @@ METRICS = {m["id"]: m for m in CATALOG}
 # other labels to metric IDs, but never supplies a value, year, scope, or unit.
 ALIASES = {
     "income": {
-        "revenue": "income_statement_8", "cost of sales": "income_statement_9",
+        "revenue": "income_statement_8", "sales": "income_statement_8",
+        "cost of sales": "income_statement_9", "cost of goods sold": "income_statement_9",
         "turnover": "income_statement_8", "net sales": "income_statement_8",
         "gross profit loss": "income_statement_10",
         "gross profit": "income_statement_10",
         "distribution expenses": "income_statement_11",
         "administrative expenses": "income_statement_12",
         "profit from operations": "income_statement_16", "operating profit": "income_statement_16",
+        "operating results": "income_statement_16",
         "finance income": "income_statement_20", "finance cost": "income_statement_21",
+        "finance expenses": "income_statement_21",
         "profit before tax": "income_statement_25", "profit before taxation": "income_statement_25",
         "income taxes": "income_statement_26", "taxation": "income_statement_26",
+        "income tax expense": "income_statement_26",
         "profit after tax": "income_statement_28",
+        "profit losses net of taxes": "income_statement_28",
     },
     "balance": {
         "cash and cash equivalents": "balance_sheet_8",
         "inventories": "balance_sheet_11", "goodwill": "balance_sheet_21",
         "other intangible assets": "balance_sheet_22",
+        "intangible assets": "balance_sheet_22",
         "property plant and equipment": "balance_sheet_19",
         "right of use assets": "balance_sheet_20",
         "deferred tax assets": "balance_sheet_26",
@@ -84,12 +91,12 @@ def _alias(row):
             return "income_statement_30"
     if row["statement"] == "balance":
         section = _label(row.get("section", ""))
-        if label == "borrowings":
+        if label in ("borrowings", "bank and bond loans"):
             if "non current liabilities" in section:
                 return "balance_sheet_39"
             if "current liabilities" in section:
                 return "balance_sheet_32"
-        if label == "lease liabilities":
+        if label in ("lease liabilities", "lease financial liability"):
             if "non current liabilities" in section:
                 return "balance_sheet_40"
             if "current liabilities" in section:
@@ -136,6 +143,229 @@ def _meaning_allowed(row, metric_id):
     ):
         return False
     return True
+
+
+# A model-proposed label mapping is accepted only when the printed label names
+# the metric's concept. Each entry lists groups of stems (every group needs one
+# match) and stems that contradict the metric. Greek stems are accent-free.
+# This vetoes positional guesses such as "Contractual liabilities" -> income
+# taxes payable; it never creates a mapping on its own.
+_TOTAL = ("total", "συνολ")
+_BORROWING = ("borrowing", "loan", "debt", "bond", "overdraft", "notes payable",
+              "commercial paper", "credit facilit", "δανει", "ομολογ")
+_CASH = ("cash", "ταμειακ", "διαθεσιμ")
+_PROFIT = ("profit", "loss", "result", "earning", "κερδ", "ζημ", "αποτελεσμ")
+MODEL_MAPPING_TERMS = {
+    "balance_sheet_8": ([_CASH], ("restricted", "committed", "blocked", "pledged", "δεσμευμεν")),
+    "balance_sheet_9": ([("investment", "securities", "financial asset", "deposit", "επενδυσ",
+                          "χρεογραφ", "καταθεσ")],
+                        ("non current", "restricted", "committed", "blocked", "pledged",
+                         "associate", "subsidiar", "δεσμευμεν")),
+    "balance_sheet_10": ([("receivable", "debtor", "customer", "πελατ")],
+                         ("tax", "derivative", "loan", "φορ")),
+    "balance_sheet_11": ([("inventor", "stock", "αποθεμ")], ()),
+    "balance_sheet_12": ([("prepa", "advance", "deferred expense", "προκαταβολ", "προπληρωμ")], ()),
+    "balance_sheet_13": ([("tax", "φορ")], ("deferred", "αναβαλλομεν")),
+    "balance_sheet_14": ([("derivative", "παραγωγ")], ()),
+    "balance_sheet_15": ([("restricted", "blocked", "committed", "pledged", "escrow",
+                           "δεσμευμεν")], ()),
+    "balance_sheet_16": ([("other", "accrued", "contract asset", "λοιπ", "συμβατικ")],
+                         ("tax", "cash", "φορ")),
+    "balance_sheet_17": ([_TOTAL, ("current", "κυκλοφορ"), ("asset", "ενεργητ")],
+                         ("non current", "μη κυκλοφορ")),
+    "balance_sheet_19": ([("property", "plant", "equipment", "tangible", "ενσωματ", "ακινητ")],
+                         ("investment property", "right of use")),
+    "balance_sheet_20": ([("right of use", "right to use", "leased asset", "δικαιωμα χρησ")], ()),
+    "balance_sheet_21": ([("goodwill", "υπεραξ")], ()),
+    "balance_sheet_22": ([("intangible", "software", "licen", "concession", "ασωματ", "παραχωρ")],
+                         ("goodwill",)),
+    "balance_sheet_23": ([("associate", "joint venture", "jointly", "equity method", "συγγεν",
+                           "κοινοπραξ")], ()),
+    "balance_sheet_24": ([("subsidiar", "θυγατρ")], ()),
+    "balance_sheet_25": ([("financial", "investment", "securities", "receivable", "loan", "deposit",
+                           "χρηματοοικονομ", "επενδυσ", "απαιτησ", "δανει")],
+                         ("associate", "joint venture", "subsidiar", "deferred tax")),
+    "balance_sheet_26": ([("deferred tax", "αναβαλλομεν")], ("liabilit", "υποχρεωσ")),
+    "balance_sheet_27": ([("other", "λοιπ")], ()),
+    "balance_sheet_28": ([_TOTAL, ("non current", "μη κυκλοφορ"), ("asset", "ενεργητ")], ()),
+    "balance_sheet_29": ([_TOTAL, ("asset", "ενεργητ")],
+                         ("current", "liabilit", "equity", "κυκλοφορ", "υποχρεωσ")),
+    "balance_sheet_31": ([("payable", "supplier", "creditor", "προμηθευτ")],
+                         ("tax", "dividend", "φορ")),
+    "balance_sheet_32": ([_BORROWING], ("lease", "μισθωσ")),
+    "balance_sheet_33": ([("lease", "μισθωσ")], ()),
+    "balance_sheet_34": ([("tax", "φορ")], ("deferred", "αναβαλλομεν")),
+    "balance_sheet_35": ([("provision", "προβλεψ")], ()),
+    "balance_sheet_36": ([("other", "accrued", "accrual", "contract", "deferred income",
+                           "advance", "customer", "derivative", "λοιπ", "συμβατικ",
+                           "προκαταβολ", "δεδουλευμεν")],
+                         ("provision", "tax", "borrow", "loan", "lease", "προβλεψ", "φορ",
+                          "δανει", "μισθωσ")),
+    "balance_sheet_37": ([_TOTAL, ("current", "βραχυπροθεσμ"), ("liabilit", "υποχρεωσ")],
+                         ("non current", "μακροπροθεσμ")),
+    "balance_sheet_39": ([_BORROWING], ("lease", "μισθωσ")),
+    "balance_sheet_40": ([("lease", "μισθωσ")], ()),
+    "balance_sheet_41": ([("employee", "retirement", "pension", "benefit", "severance",
+                           "personnel", "staff", "εργαζομεν", "αποζημιωσ", "συνταξ",
+                           "προσωπικ")], ()),
+    "balance_sheet_42": ([("deferred tax", "αναβαλλομεν")], ("asset", "απαιτησ")),
+    "balance_sheet_43": ([("other", "provision", "grant", "deferred income", "contract",
+                           "derivative", "λοιπ", "προβλεψ", "επιχορηγ")],
+                         ("borrow", "loan", "lease", "tax", "employee", "retirement",
+                          "pension", "δανει", "μισθωσ", "φορ")),
+    "balance_sheet_44": ([_TOTAL, ("non current", "μακροπροθεσμ"), ("liabilit", "υποχρεωσ")], ()),
+    "balance_sheet_45": ([_TOTAL, ("liabilit", "υποχρεωσ")],
+                         ("current", "equity", "βραχυπροθεσμ", "μακροπροθεσμ", "ιδια")),
+    "balance_sheet_47": ([("share capital", "share premium", "capital", "premium", "μετοχικ",
+                           "υπερ το αρτιο")], ("working capital", "reserve")),
+    "balance_sheet_48": ([("reserve", "treasury", "own shares", "αποθεματικ", "ιδιες μετοχ")], ()),
+    "balance_sheet_49": ([("retained", "accumulated", "carried forward", "εις νεον")], ()),
+    "balance_sheet_50": ([("owner", "shareholder", "parent", "equity holder", "μετοχ",
+                           "ιδιοκτητ")], ("non controlling", "minority", "μη ελεγχ")),
+    "balance_sheet_51": ([("non controlling", "minority", "μη ελεγχ", "μειοψηφ")], ()),
+    "balance_sheet_52": ([_TOTAL, ("equity", "ιδια κεφαλαια", "ιδιων κεφαλαιων")],
+                         ("liabilit", "attributable", "υποχρεωσ")),
+    "balance_sheet_53": ([("prefer", "προνομιουχ")], ()),
+    "balance_sheet_54": ([("past due", "overdue", "ληξιπροθεσμ")], ()),
+    "income_statement_8": ([("revenue", "sales", "turnover", "πωλησ", "εσοδα",
+                             "κυκλος εργασιων")],
+                           ("cost", "other", "finance", "interest", "κοστος", "λοιπ",
+                            "χρηματοοικονομ")),
+    "income_statement_9": ([("cost of", "κοστος")],
+                           ("finance", "distribution", "administrat", "χρηματοοικονομ")),
+    "income_statement_10": ([("gross", "μικτ")], ()),
+    "income_statement_11": ([("selling", "distribution", "marketing", "διαθεσ")], ()),
+    "income_statement_12": ([("administrat", "general", "διοικητικ")], ()),
+    "income_statement_13": ([("research", "development", "ερευν")], ()),
+    "income_statement_14": ([("expense", "cost", "loss", "impairment", "εξοδ", "ζημ", "απομειωσ")],
+                            ("finance", "interest", "tax", "income", "gain", "sales",
+                             "χρηματοοικονομ", "φορ", "εσοδ")),
+    "income_statement_15": ([("income", "gain", "εσοδ", "κερδ")],
+                            ("finance", "interest", "tax", "associate", "before",
+                             "χρηματοοικονομ", "φορ")),
+    "income_statement_16": ([("operating", "εκμεταλλευσ", "λειτουργικ", "ebit")],
+                            ("other", "expense", "cost", "before", "λοιπ", "εξοδ")),
+    "income_statement_17": ([("depreciation", "amortisation", "amortization", "αποσβεσ")], ()),
+    "income_statement_18": ([("ebitda",)], ()),
+    "income_statement_20": ([("finance", "financial", "interest", "χρηματοοικονομ", "τοκ"),
+                             ("income", "revenue", "εσοδ")], ("cost", "expense", "net", "εξοδ")),
+    "income_statement_21": ([("finance", "financial", "interest", "χρηματοοικονομ", "τοκ"),
+                             ("cost", "expense", "charge", "εξοδ", "κοστ")], ("income", "εσοδ")),
+    "income_statement_22": ([("interest", "τοκ"), ("expense", "cost", "charge", "εξοδ",
+                                                    "χρεωστικ")], ()),
+    "income_statement_23": ([("associate", "joint venture", "equity method", "συγγεν",
+                              "κοινοπραξ")], ()),
+    "income_statement_24": ([("gain", "loss", "other", "impairment", "fair value", "disposal",
+                              "κερδ", "ζημ", "λοιπ")],
+                            ("operating", "tax", "before", "after", "associate",
+                             "εκμεταλλευσ", "φορ")),
+    "income_statement_25": ([("before tax", "before income tax", "pre tax", "προ φορ")], ()),
+    "income_statement_26": ([("tax", "φορ")], ("before", "after", "net of", "προ φορ", "μετα φορ")),
+    "income_statement_27": ([("discontinued", "διακοπεισ")], ()),
+    "income_statement_28": ([_PROFIT],
+                            ("before", "gross", "operating", "attributable", "owner",
+                             "non controlling", "minority", "per share", "comprehensive",
+                             "discontinued", "continuing", "προ φορ", "μικτ",
+                             "εκμεταλλευσ")),
+    "income_statement_29": ([("owner", "shareholder", "parent", "equity holder",
+                              "attributable to", "μετοχ", "ιδιοκτητ")],
+                            ("non controlling", "minority", "per share", "μη ελεγχ")),
+    "income_statement_30": ([("non controlling", "minority", "μη ελεγχ", "μειοψηφ")],
+                            ("per share",)),
+    "income_statement_31": ([("prefer", "προνομιουχ"), ("dividend", "μερισμ")], ()),
+    "income_statement_32": ([("purchase", "αγορ")], ()),
+    "income_statement_33": ([("credit",)], ()),
+    "market_inputs_10": ([("basic", "βασικ"), ("per share", "ανα μετοχ", "eps")], ("diluted",)),
+    "market_inputs_11": ([("diluted", "απομειωμεν"), ("per share", "ανα μετοχ", "eps")], ()),
+    "cash_flow_statement_8": ([_PROFIT], ("disposal", "sale", "fair value", "associate",
+                                          "foreign", "πωλησ")),
+    "cash_flow_statement_9": ([("depreciation", "amortis", "amortiz", "αποσβεσ")], ()),
+    "cash_flow_statement_10": ([("adjust", "non cash", "other", "προσαρμογ", "λοιπ")], ()),
+    "cash_flow_statement_11": ([("inventor", "stock", "αποθεμ")], ()),
+    "cash_flow_statement_12": ([("receivable", "debtor", "απαιτησ")], ()),
+    "cash_flow_statement_13": ([("payable", "liabilit", "creditor", "υποχρεωσ")],
+                               ("tax", "interest", "lease", "borrow", "φορ", "τοκ")),
+    "cash_flow_statement_14": ([("working capital", "other", "contract", "provision", "prepa",
+                                 "λοιπ", "προβλεψ")], ()),
+    "cash_flow_statement_15": ([("interest", "finance cost", "τοκ", "χρηματοοικονομ")], ()),
+    "cash_flow_statement_16": ([("tax", "φορ")], ()),
+    "cash_flow_statement_17": ([("other", "λοιπ")], ()),
+    "cash_flow_statement_18": ([("operating", "λειτουργικ")], ("before", "profit", "κερδ")),
+    "cash_flow_statement_20": ([("purchase", "acquisition", "payment", "addition",
+                                 "capital expenditure", "αγορ", "αποκτ"),
+                                ("property", "plant", "equipment", "tangible", "intangible",
+                                 "fixed asset", "ενσωματ", "ασωματ", "παγι")],
+                               ("proceeds", "sale", "disposal", "πωλησ", "εισπραξ")),
+    "cash_flow_statement_21": ([("proceeds", "sale", "disposal", "πωλησ", "εισπραξ"),
+                                ("property", "plant", "equipment", "tangible", "intangible",
+                                 "fixed", "ενσωματ", "ασωματ", "παγι")], ()),
+    "cash_flow_statement_22": ([("acquisition", "purchase", "αποκτ", "αγορ"),
+                                ("subsidiar", "business", "θυγατρ")], ()),
+    "cash_flow_statement_23": ([("investment", "securities", "financial asset", "associate",
+                                 "joint venture", "επενδυσ", "χρεογραφ", "συγγεν")], ()),
+    "cash_flow_statement_24": ([("interest", "τοκ"), ("received", "εισπρα")], ()),
+    "cash_flow_statement_25": ([("dividend", "μερισμ"), ("received", "εισπρα")], ()),
+    "cash_flow_statement_26": ([("other", "grant", "loan", "deposit", "restricted", "λοιπ",
+                                 "δανει", "επιχορηγ")], ()),
+    "cash_flow_statement_27": ([("investing", "επενδυτικ")], ()),
+    "cash_flow_statement_29": ([("share", "capital", "μετοχ", "κεφαλαι"),
+                                ("issue", "increase", "proceeds", "εκδοσ", "αυξησ")], ()),
+    "cash_flow_statement_30": ([("treasury", "own shares", "repurchase", "buy", "ιδιες μετοχ")], ()),
+    "cash_flow_statement_31": ([_BORROWING, ("proceeds", "new", "issue", "received", "drawdown",
+                                             "εισπραξ", "αναληψ")],
+                               ("repay", "lease", "εξοφλ", "μισθωσ")),
+    "cash_flow_statement_32": ([_BORROWING, ("repay", "repaid", "settle", "εξοφλ", "αποπληρ")],
+                               ("lease", "μισθωσ")),
+    "cash_flow_statement_33": ([("lease", "μισθωσ")], ()),
+    "cash_flow_statement_34": ([("dividend", "μερισμ")], ("received", "εισπρα")),
+    "cash_flow_statement_35": ([("interest", "finance cost", "τοκ"), ("paid", "καταβλ", "πληρω")], ()),
+    "cash_flow_statement_36": ([("other", "grant", "transaction cost", "non controlling",
+                                 "λοιπ", "μη ελεγχ")], ()),
+    "cash_flow_statement_37": ([("financing", "χρηματοδοτικ")], ()),
+    "cash_flow_statement_39": ([("exchange", "foreign", "currency", "translation", "fx",
+                                 "συναλλαγματ")], ()),
+    "cash_flow_statement_40": ([_CASH, ("beginning", "opening", "start", "αρχη")], ()),
+    "cash_flow_statement_41": ([_CASH, ("end", "closing", "τελος", "ληξη")], ()),
+    "cash_flow_statement_42": ([("difference", "restricted", "overdraft", "διαφορ")], ()),
+    "cash_flow_statement_44": ([("core", "underlying", "adjusted")], ()),
+    "changes_in_equity_7": ([("balance", "opening", "beginning", "υπολοιπο")], ("closing", "end")),
+    "changes_in_equity_8": ([_PROFIT], ("comprehensive", "other")),
+    "changes_in_equity_9": ([("other comprehensive", "λοιπα συνολικα")], ()),
+    "changes_in_equity_10": ([("issue", "increase", "option", "exercise", "εκδοσ", "αυξησ")], ()),
+    "changes_in_equity_11": ([("treasury", "own shares", "repurchase", "ιδιες μετοχ")], ()),
+    "changes_in_equity_12": ([("dividend", "μερισμ")], ()),
+    "changes_in_equity_13": ([("non controlling", "ownership", "subsidiar", "acquisition",
+                               "disposal", "μη ελεγχ", "θυγατρ")], ()),
+    "changes_in_equity_14": ([("other", "restat", "transfer", "reclass", "λοιπ", "αναμορφ",
+                               "μεταφορ")], ()),
+    "changes_in_equity_15": ([("balance", "closing", "end", "υπολοιπο")], ("opening", "beginning")),
+}
+
+
+def _plain_label(text):
+    decomposed = unicodedata.normalize("NFD", _label(text))
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def model_mapping_rejection(label, metric_id):
+    """Return why a model-proposed mapping is unsupported, or None if plausible."""
+    rule = MODEL_MAPPING_TERMS.get(metric_id)
+    if rule is None:
+        return "No local label rule exists for this metric"
+    text = _plain_label(label)
+    required, contradicting = rule
+
+    def has(stem):
+        # A stem starts at a word boundary and may end mid-word (receivable/s).
+        return re.search(r"(?<![^\W_])" + re.escape(stem), text) is not None
+
+    for group in required:
+        if not any(has(stem) for stem in group):
+            return f"Printed label does not mention {' / '.join(group[:4])}"
+    clash = next((stem for stem in contradicting if has(stem)), None)
+    if clash:
+        return f"Printed label mentions '{clash}', which contradicts this metric"
+    return None
 
 
 def normalise(text):
@@ -248,6 +478,8 @@ def _candidates_from_row(row, metric_id, source, pages_by_source, settings, reje
                          "reason": "Combined or context-dependent row does not prove this metric"})
         return candidates
     for value in row["values"]:
+        if value["raw_value"].strip() in ("-", "–", "—"):
+            continue  # A dash is a missing printed amount, not a zero.
         if value["scope"] != settings.scope or not settings.latest_year - 5 <= value["year"] <= settings.latest_year:
             continue
         try:
@@ -277,8 +509,29 @@ def _candidates_from_row(row, metric_id, source, pages_by_source, settings, reje
     return candidates
 
 
-async def extract(pages, settings: Settings, progress, complete=completion, plan=None):
-    """Map printed row labels; copy every numeric token from a known PDF column."""
+def saved_label_key(document_id, page, label):
+    """Identify a printed row across re-reads, ignoring its note reference."""
+    return (document_id, page, re.sub(r"(?:\s+\d+)+[a-zα-ω]?$", "", _label(label)))
+
+
+def saved_model_mappings(candidates):
+    """Earlier model label mappings, reusable when the same PDF is re-read."""
+    known = {}
+    for c in candidates:
+        if c.get("mapping_source") == "Groq label mapping" and c.get("row_label"):
+            known.setdefault(saved_label_key(c.get("document_id"), c.get("page"),
+                                             c["row_label"]), set()).add(c["metric_id"])
+    return {key: next(iter(ids)) for key, ids in known.items() if len(ids) == 1}
+
+
+async def extract(pages, settings: Settings, progress, complete=completion, plan=None,
+                  known=None):
+    """Map printed row labels; copy every numeric token from a known PDF column.
+
+    With ``known`` (from saved_model_mappings) no provider request is made:
+    unfamiliar labels reuse an earlier model mapping for the same printed row
+    on the same page, re-checked by the local rules, or stay unmapped.
+    """
     plan = plan or statement_plan(pages)
     panels, _ = plan
     if not panels:
@@ -289,7 +542,19 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
     }
     rejected, candidates = [], []
     mapped = [(row, metric_id, "exact label") for row in rows if (metric_id := _alias(row))]
-    tasks = mapping_tasks(plan)
+    tasks = mapping_tasks(plan) if known is None else []
+    for row in rows if known is not None else []:
+        if _alias(row) or len(row["label"]) < 4:
+            continue
+        metric_id = known.get(saved_label_key(row["document_id"], row["page"], row["label"]))
+        reason = ("No saved model mapping for this label; retry the job to classify it"
+                  if metric_id is None else model_mapping_rejection(row["label"], metric_id))
+        if reason:
+            rejected.append({"file": row["file"], "page": row["page"], "row_label": row["label"],
+                             "metric_id": metric_id, "reason": reason if metric_id is None
+                             else f"Model label mapping rejected: {reason}"})
+            continue
+        mapped.append((row, metric_id, "Groq label mapping"))
     progress(0, len(tasks))
     done, index = 0, 0
     while index < len(tasks):
@@ -338,6 +603,12 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
                                  "metric_id": match.metric_id, "reason": "Invalid or duplicate metric mapping"})
                 continue
             seen.add(match.row_id)
+            reason = model_mapping_rejection(row["label"], match.metric_id)
+            if reason:
+                rejected.append({"file": row["file"], "page": row["page"],
+                                 "row_label": row["label"], "metric_id": match.metric_id,
+                                 "reason": f"Model label mapping rejected: {reason}"})
+                continue
             mapped.append((row, match.metric_id, "Groq label mapping"))
         done += 1
         index += 1

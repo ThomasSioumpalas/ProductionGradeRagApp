@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import unicodedata
 from pathlib import Path
 
 import pymupdf
@@ -26,14 +27,23 @@ FINANCIAL_TERMS = (
 )
 PRIMARY_STATEMENT_TERMS = FINANCIAL_TERMS[:5]
 NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\(?-?\d{1,3}(?:[,. ]\d{3})+(?:[,.]\d+)?\)?|\(?-?\d+[,.]\d+\)?)")
-DATE_PATTERN = re.compile(r"(?:\d{1,2}/\d{1,2}-)?\d{1,2}/\d{1,2}/\d{2,4}$")
+# Year-end dates (31/12/2025, 31.12.2025) and period columns
+# (1/1-31/12/2025, 01.01-31.12.2025, 01.01.2025-31.12.2025).
+DATE_PATTERN = re.compile(r"(?:\d{1,2}[./]\d{1,2}(?:[./](?:\d{2,4})?)?[-–])?\d{1,2}[./]\d{1,2}[./]\d{2,4}$")
 YEAR_COLUMN = re.compile(r"20\d{2}(?:\([a-d]\))?", re.I)
 AMOUNT_PATTERN = re.compile(r"(?:\(?[+\-−]?\d[\d.,]*\)?|0)$")
+_TITLE_PREFIX = r"^\s*(?:\d{1,2}[.)]\s*)?(?:[\w-]+\s+){0,3}?(?:consolidated\s+|separate\s+)?"
+# Titles are matched on accent-stripped, casefolded text, so Greek headings
+# printed in capitals (ΚΑΤΑΣΤΑΣΗ ΤΑΜΕΙΑΚΩΝ ΡΟΩΝ) match their accented form.
 STATEMENT_TITLES = (
-    ("income", re.compile(r"^\s*(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of (?:profit or loss|comprehensive income|income)|income statement)\b", re.I | re.M)),
-    ("balance", re.compile(r"^\s*(?:[\w-]+\s+){0,3}?(?:consolidated\s+)?(?:statement of financial position|balance sheet)\b", re.I | re.M)),
-    ("equity", re.compile(r"^\s*(?:consolidated\s+)?statement of changes in equity\b", re.I | re.M)),
-    ("cash", re.compile(r"^\s*(?:consolidated\s+)?(?:statement of cash flows|cash flow statement)\b", re.I | re.M)),
+    ("income", re.compile(_TITLE_PREFIX + r"(?:statement of (?:profit or loss|comprehensive income|income)|income statement"
+                          r"|καταστ\w* (?:αποτελεσματων|συνολικου εισοδηματος))\b", re.I | re.M)),
+    ("balance", re.compile(_TITLE_PREFIX + r"(?:statement of financial position|balance sheet"
+                           r"|καταστ\w* χρηματοοικονομικης θεσης|ισολογισμος)\b", re.I | re.M)),
+    ("equity", re.compile(_TITLE_PREFIX + r"(?:statement of changes in (?:[\w’']+\s+)?equity"
+                          r"|καταστ\w* μεταβολων (?:των )?ιδιων κεφαλαιων)\b", re.I | re.M)),
+    ("cash", re.compile(_TITLE_PREFIX + r"(?:statement of cash flows?|cash flows? statement"
+                        r"|καταστ\w* ταμειακων ροων)\b", re.I | re.M)),
 )
 MAX_ROWS_PER_REQUEST = 16
 
@@ -67,7 +77,8 @@ def _lines(words):
 
 
 def _year(token):
-    match = re.search(r"((?:19|20)\d{2})(?!\d)", token)
+    # A period column is labelled by its end date (01.07.2024-30.06.2025).
+    match = next(reversed(list(re.finditer(r"((?:19|20)\d{2})(?!\d)", token))), None)
     if not match:
         match = re.search(r"(\d{2})$", token)
     if not match:
@@ -76,8 +87,13 @@ def _year(token):
     return n if n >= 1900 else (2000 + n if n < 80 else 1900 + n)
 
 
+def _plain(text):
+    decomposed = unicodedata.normalize("NFD", text.casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 def _statement_title(text):
-    start = text[:650].casefold()
+    start = _plain(text[:650])
     if "contents" in start[:180] or "notes to the financial statements" in start[:250]:
         return None
     for kind, pattern in STATEMENT_TITLES:
@@ -133,6 +149,35 @@ def _table_headers(lines, text):
     return []
 
 
+_CURRENCY = r"(?:euros?|eur|ευρώ|usd|dollars?|gbp|pounds?|€|\$|£)"
+_CODE = r"(?:€|\$|£|\b(?:euros?|eur|usd|gbp|dollars?))"
+# Only an explicit presentation-unit phrase sets the scale. A bare "000" inside
+# a printed amount (349.523.000, 1,000) or the word "thousand" in prose is not
+# a declaration; the earliest declaration on the page is the table heading.
+UNIT_DECLARATIONS = (
+    (1000, re.compile(
+        r"thousands?\s*(?:of\s*)?" + _CURRENCY
+        + r"|" + _CODE + r"\s*thousands?\b"
+        + r"|" + _CODE + r"\s*['’]?\s*000(?![\d.,]*\d)"
+        + r"|(?<![\d.,'’])['’]?000['’]?s\b"
+        + r"|\bin\s*thousands?\b|\b(?:teur|keur)\b|\bk€|€\s*k\b"
+        + r"|χιλ(?:ιάδες|\.)?\s*(?:ευρώ|€)|ποσά\s*σε\s*χιλ", re.I)),
+    (1000000, re.compile(
+        r"millions?\s*(?:of\s*)?" + _CURRENCY
+        + r"|" + _CODE + r"\s*(?:millions?|mn|mio|m)\b"
+        + r"|\bin\s*millions?\b"
+        + r"|εκατ(?:ομμύρια|\.)?\s*(?:ευρώ|€)|ποσά\s*σε\s*εκατ", re.I)),
+    (1, re.compile(
+        r"amounts?\s*(?:are\s*)?(?:expressed\s*|presented\s*|stated\s*|shown\s*)?in\s*"
+        + _CURRENCY + r"(?![^\W\d_])(?!\s*(?:thousands?|millions?|['’]?000|mn\b|mio\b|m\b|k\b))"
+        + r"|\(\s*in\s*" + _CURRENCY + r"\s*\)"
+        + r"|ποσά\s*(?:σε|εκφρασμένα\s*σε)\s*(?:ευρώ|€)", re.I)),
+)
+# Weaker wording, used only when no explicit declaration is present.
+UNIT_FALLBACK = re.compile(
+    r"\bin\s*(?:euros?|eur|usd|gbp)\b(?!\s*(?:thousands?|millions?|['’]?000|mn\b|m\b))", re.I)
+
+
 def _unit(text):
     opening = text[:2100].casefold()
     if "euro" in opening or "eur" in opening or "ευρώ" in opening or "€" in opening:
@@ -143,15 +188,13 @@ def _unit(text):
         currency = "GBP"
     else:
         return None
-    if re.search(r"(?:000['’]s|\b0{3}\b|thousands?|χιλιάδ)", opening):
-        scale = 1000
-    elif re.search(r"(?:millions?|\bmn\b|€\s?m\b|εκατομμύρ)", opening):
-        scale = 1000000
-    elif re.search(r"\b(in|amounts? in)\s+(?:euros?|eur|usd|gbp)\b", opening):
-        scale = 1
-    else:
-        return None
-    return currency, scale
+    found = [(match.start(), scale) for scale, pattern in UNIT_DECLARATIONS
+             if (match := pattern.search(opening))]
+    if found:
+        return currency, min(found)[1]
+    if UNIT_FALLBACK.search(opening):
+        return currency, 1
+    return None
 
 
 def _table_rows(lines, headers, panel, page, include_unlabelled=False):
@@ -165,7 +208,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
         words = line["words"]
         label_words = sorted((word for word in words if word[0] < first), key=lambda w: (w[1], w[0]))
         label = " ".join(word[4] for word in label_words).strip()
-        numbers = [word for word in words if word[0] >= first and AMOUNT_PATTERN.fullmatch(word[4])]
+        numbers = [word for word in words if word[0] >= first and (AMOUNT_PATTERN.fullmatch(word[4]) or word[4] in ("-", "–", "—"))]
         if not numbers:
             if label and any(key in label.casefold() for key in (
                 "current assets", "current liabilities", "non-current assets",
@@ -178,7 +221,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
         if len(numbers) != len(headers) or (not include_unlabelled and not re.search(r"[^\W\d_]", label)):
             continue
         # Note references occupy the narrow gap just before the amount columns.
-        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:,\d+)?", label_words[-1][4]):
+        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:[.,]\d+)?[a-zα-ω]?", label_words[-1][4], re.I):
             label = " ".join(word[4] for word in label_words[:-1]).strip()
         values = []
         for header, word in zip(headers, numbers):
@@ -196,6 +239,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
             "statement": panel["statement"], "section": section, "label": label,
             "quote": " ".join(word[4] for word in label_words + numbers),
             "currency": panel["currency"], "scale": panel["scale"],
+            "unit_source": panel.get("unit_source", ""),
             "y": round(line["y"], 1),
             "values": values,
         }
@@ -206,20 +250,31 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
 
 
 def _annotate_statements(pages):
+    """Label statement and note tables; return document-level unit warnings."""
     active = None
     in_notes = False
     seen_statements = False
     document = None
+    # A statement's own unit heading is carried to (a) the immediately
+    # following continuation page of the same statement and (b) later note
+    # tables in the same PDF that print no unit of their own. Notes follow the
+    # statements' presentation unit unless a page declares otherwise.
+    statement_unit, previous_statement, units_by_document = None, None, {}
     for page in pages:
         if page["sha256"] != document:
             active, in_notes, document = None, bool(re.search(r"\bnotes?\b", page["file"], re.I)), page["sha256"]
             seen_statements = False
+            statement_unit, previous_statement = None, None
         for panel in page["panels"]:
             text = panel["text"]
             note_heading = re.search(r"\bnotes\s+to\s+(?:the\s+)?(?:consolidated\s+)?financial\s+statements\b", text[:500], re.I)
-            if "contents" in text[:200].casefold() or (seen_statements and note_heading):
+            numbered_notes = re.search(
+                r"(?m)^\s*(?:5\.\s+General information|6\.\s+Basis of preparation|7\.\s+Detailed data)",
+                text[:650], re.I
+            )
+            if "contents" in text[:200].casefold() or (seen_statements and (note_heading or numbered_notes)):
                 active = None
-            if seen_statements and note_heading:
+            if seen_statements and (note_heading or numbered_notes):
                 in_notes = True
             heading = _statement_title(text)
             if heading and not in_notes:
@@ -227,27 +282,42 @@ def _annotate_statements(pages):
             lines = _lines(panel.pop("_words"))
             headers = _table_headers(lines, text)
             unit = _unit(text)
+            unit_source = f"declared on page {page['page']}" if unit else ""
+            years = [(h["year"], h["scope"]) for h in headers]
+            if (not unit and active and headers and statement_unit and previous_statement
+                    and previous_statement[1] == active and previous_statement[2] == years
+                    and page["page"] - previous_statement[0] in (0, 1)):
+                unit, unit_source = statement_unit
             if active and headers and unit:
                 panel["statement"] = active
                 panel["headers"] = [{k: v for k, v in h.items() if k != "y"} for h in headers]
                 panel["currency"], panel["scale"] = unit
+                panel["unit_source"] = unit_source
                 panel["rows"] = _table_rows(lines, headers, panel, page)
                 if panel["rows"]:
                     seen_statements = True
+                    previous_statement = (page["page"], active, years)
+                    if unit_source.startswith("declared"):
+                        statement_unit = (unit, f"inherited from page {page['page']}")
+                        units_by_document.setdefault((page["file"], document), {}).setdefault(
+                            unit, []).append(page["page"])
                 page["tables"] += "\n".join(row["quote"] for row in panel["rows"]) + "\n"
             else:
                 is_continuation = active and re.search(r"\b(group|company)\b", text[:240], re.I)
                 panel.update(statement=active if heading or is_continuation else None,
                              headers=[], rows=[])
+                if not unit and seen_statements and statement_unit:
+                    unit, unit_source = statement_unit
                 # Financial statement notes contain dated tables that were
                 # previously indexed as prose but excluded from extraction.
                 # The heading and coordinates keep similarly named rows in
                 # different notes from being conflated.
                 if (in_notes or not active) and headers and unit and "contents" not in text[:200].casefold():
                     note_panel = {"side": panel["side"], "statement": "note",
-                                  "currency": unit[0], "scale": unit[1]}
+                                  "currency": unit[0], "scale": unit[1],
+                                  "unit_source": unit_source}
                     titles = [(line["y"], " ".join(w[4] for w in line["words"]))
-                              for line in lines if re.match(r"^\s*\d{1,2}\.\s+[A-Za-zΑ-Ωα-ω]",
+                              for line in lines if re.match(r"^\s*\d{1,2}(?:\.\d{1,2}[a-z]?)?\.?\s+[A-Za-zΑ-Ωα-ω]",
                                                      " ".join(w[4] for w in line["words"]))]
                     panel["note_rows"] = _table_rows(lines, headers, note_panel, page,
                                                        include_unlabelled=True)
@@ -255,6 +325,16 @@ def _annotate_statements(pages):
                         row["note_title"] = next((title for y, title in reversed(titles) if y < row["y"]), "")
                     panel["note_headers"] = [{k: v for k, v in h.items() if k != "y"} for h in headers]
                     page["tables"] += "\n".join(row["quote"] for row in panel["note_rows"]) + "\n"
+    warnings = []
+    for (filename, _), units in units_by_document.items():
+        if len(units) > 1:
+            described = "; ".join(
+                f"{currency} x{scale:,} on page(s) {', '.join(map(str, sorted(set(pages_))))}"
+                for (currency, scale), pages_ in units.items())
+            warnings.append(
+                f"{filename}: primary statements declare different units ({described}). "
+                "Check each statement heading before using these figures together.")
+    return warnings
 
 
 def statement_plan(pages):
@@ -292,7 +372,7 @@ def read_pdf(path: Path, filename: str, start_id: int = 0):
                 warnings.append(f"{filename}, page {index + 1}: little or no readable text; OCR may be needed.")
             pages.append({"id": start_id + index, "file": filename, "sha256": digest,
                           "page": index + 1, "text": text, "tables": "", "panels": panels})
-    _annotate_statements(pages)
+    warnings.extend(_annotate_statements(pages))
     if not pages or not any(len(p["text"]) >= 40 for p in pages):
         raise ValueError(f"No usable text in {filename}. Run OCR before uploading.")
     return pages, warnings

@@ -20,7 +20,8 @@ from pydantic import ValidationError
 from .analysis import (check_reported_measures, enrich_financial_evidence,
                        kpi_coverage, merge_evidence)
 from .documents import read_pdf, statement_plan
-from .engine import CATALOG, METRICS, extract, mapping_tasks, provisional_decisions, reconcile
+from .engine import (CATALOG, METRICS, extract, mapping_tasks, provisional_decisions, reconcile,
+                     saved_model_mappings)
 from .forecast import operating_scenarios
 from .investigation import investigate_gaps
 from .llm import ProviderError, completion
@@ -126,6 +127,26 @@ async def worker(app):
                 error="Extraction failed. Check backend logs and retry.",
             )
         app.state.store.put(job)
+
+
+def recheck_decisions(decisions, candidates):
+    """Keep a reviewed input only if a re-read still cites the same value.
+
+    Returns the kept decisions and (decision, current values) for the others.
+    Manual values carry their own source note and are kept.
+    """
+    by_source = {}
+    for c in candidates:
+        by_source.setdefault((c["metric_id"], c["year"], c.get("document_id"), c.get("page")),
+                             set()).add(str(Decimal(c["value"]).normalize()))
+    kept, changed = [], []
+    for d in decisions:
+        now = by_source.get((d["metric_id"], d["year"], d.get("document_id"), d.get("page")), set())
+        if d.get("manual") or str(Decimal(d["value"]).normalize()) in now:
+            kept.append(d)
+        else:
+            changed.append((d, now))
+    return kept, changed
 
 
 def create_app(root=None, start_worker=True):
@@ -501,26 +522,54 @@ def create_app(root=None, start_worker=True):
                 warnings.extend(w)
             app.state.store.index_pages(job_id, pages)
             settings = Settings(**job["settings"])
+            # Re-extract statement rows with the current parser. Unfamiliar
+            # labels reuse this job's earlier model mappings (re-checked by the
+            # local rules), so no provider request is made.
+            plan = statement_plan(pages)
+            statement, rejected = [], []
+            if plan[0]:
+                try:
+                    statement, rejected = await extract(
+                        pages, settings, lambda *_: None, plan=plan,
+                        known=saved_model_mappings(job["candidates"]))
+                except ValueError as exc:
+                    if "no grounded figures" not in str(exc):
+                        raise
             added, reported = enrich_financial_evidence(
                 pages, settings, search=lambda q, **kw: app.state.store.search(job_id, q, **kw)
             )
-            selected_ids = [d["id"] for d in job["decisions"] if d.get("id")]
-            candidates, invalid = merge_evidence(job["candidates"], added, selected_ids)
+            candidates, invalid = merge_evidence(statement, added)
+            decisions, changed = recheck_decisions(job["decisions"], candidates)
+            for d, now in changed:
+                warnings.append(
+                    f"{METRICS[d['metric_id']]['label']['en']} {d['year']}: the reviewed value "
+                    f"{d['value']} (page {d.get('page')}) is not what the corrected re-read finds"
+                    + (f" ({', '.join(sorted(now))})" if now else "")
+                    + ". Review it again.")
+            unmapped = sum(r["reason"].startswith("No saved model mapping") for r in rejected)
+            warnings.append(
+                f"Re-read {len(pages)} PDF pages without Groq: {len(statement)} statement and "
+                f"{len(added)} note candidates."
+                + (f" {unmapped} unfamiliar row labels had no earlier model mapping; retry the "
+                   "job to classify them." if unmapped else ""))
             checked = check_reported_measures(candidates, reported)
             coverage = kpi_coverage(candidates, settings, checked)
+            if changed or (original_status == "ready" and not decisions):
+                original_status = "review"
             job.update(pages=pages, candidates=candidates, reported_measures=reported,
-                       coverage=coverage,
+                       coverage=coverage, decisions=decisions,
+                       checks=reconcile(decisions, settings),
                        investigations=investigate_gaps(
                            pages, coverage, settings,
                            lambda q, **kw: app.state.store.search(job_id, q, **kw)),
                        scenarios=operating_scenarios(
-                           job["decisions"] if original_status == "ready" else provisional_decisions(candidates),
+                           decisions if original_status == "ready" else provisional_decisions(candidates),
                            settings),
-                       rejected=job["rejected"] + [
+                       rejected=rejected + [
                            {"file": c["file"], "page": c["page"], "row_label": c.get("row_label"),
                             "metric_id": c["metric_id"],
                             "reason": "Earlier model mapping was a component, not the requested total"}
-                           for c in invalid], warnings=job["warnings"] + warnings)
+                           for c in invalid], warnings=warnings)
         except (ValueError, OSError) as exc:
             job["status"] = original_status
             app.state.store.put(job)

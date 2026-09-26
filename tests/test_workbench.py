@@ -911,3 +911,286 @@ def test_provider_retry_delay_parses_daily_limit_window():
             }
 
     assert retry_delay(FakeResponse(), 0) == pytest.approx(223.048)
+
+
+def test_dotted_dates_numbered_titles_and_issuer_units():
+    from financial_workbench.documents import _statement_title, _unit, _year
+    assert _year("31.12.2025") == 2025
+    assert _statement_title("Annual Financial Report\n1.  Statement of Financial Position") == "balance"
+    assert _statement_title("Annual Financial Report\n2.  Statement of Comprehensive Income") == "income"
+    assert _unit("Annual Financial Report\n(AmountsinEuro) GROUP COMPANY") == ("EUR", 1)
+
+
+def test_aktor_2025_primary_statements_and_note_bridges():
+    """Optional real-PDF regression: run with WORKBENCH_AKTOR_PDF=/path/to/report.pdf."""
+    pdf = os.environ.get("WORKBENCH_AKTOR_PDF")
+    if not pdf:
+        pytest.skip("Set WORKBENCH_AKTOR_PDF to AKTOR's 306-page FY2025 annual report")
+    pages, _ = read_pdf(Path(pdf), Path(pdf).name)
+    assert len(pages) == 306
+    panels, batches = statement_plan(pages)
+    assert panels and batches
+    balance = [p for p in panels if p["page"] == 208 and p["statement"] == "balance"]
+    income = [p for p in panels if p["page"] == 209 and p["statement"] == "income"]
+    assert balance and income
+    notes = [r for p in pages for x in p["panels"] for r in x.get("note_rows", [])
+             if p["page"] == 264]
+    assert any(r["label"].strip() == "Final trade receivables" for r in notes)
+    async def no_model(messages, **kwargs):
+        return '{"mappings":[]}'
+    settings = Settings(company="AKTOR", latest_year=2025)
+    facts, _ = asyncio.run(extract(pages, settings, lambda *_: None,
+                                   complete=no_model, plan=(panels, batches)))
+    for metric, amount in (("balance_sheet_8", "268.681474"),
+                           ("balance_sheet_17", "1504.190595"),
+                           ("balance_sheet_37", "1243.781966"),
+                           ("income_statement_8", "1394.998664"),
+                           ("income_statement_16", "72.650399")):
+        assert amount in [c["value"] for c in facts
+                          if c["metric_id"] == metric and c["year"] == 2025]
+    added, _ = enrich_financial_evidence(pages, settings)
+    assert any(c["metric_id"] == "balance_sheet_10" and
+               c["year"] == 2025 and c["value"] == "254.775833" for c in added)
+    assert any(c["metric_id"] == "income_statement_22" and
+               c["year"] == 2025 and c["value"] == "39.035163" for c in added)
+    book = export_workbook(settings, provisional_decisions(facts + added), [],
+                           reviewed=False)
+    assert book.startswith(b"PK")
+
+
+@pytest.mark.parametrize("text, scale", [
+    # AKTOR FY2025 p.209: "Amounts in Euro" header, round company amount 349.523.000.
+    ("2. Statement of Comprehensive Income\n(AmountsinEuro) GROUP COMPANY\n"
+     "Sales 6.31 1.394.998.664 1.254.923.600 349.523.000 481.696.745", 1),
+    ("Statement of profit or loss\nAmounts in euros\n2025 2024\nRevenue 1,000 2,500,000", 1),
+    ("Statement of financial position\nAmounts in Euro\nThe Group employs several thousand people", 1),
+    ("Statement of Profit or Loss\nIn 000's Euros", 1000),
+    ("Balance sheet\n€'000 2025 2024\nCash 1,000 900", 1000),
+    ("Balance sheet (Amounts in EUR thousands) 2025 2024", 1000),
+    ("Example SA. Consolidated. Annual 2025. EUR thousands.", 1000),
+    ("Κατάσταση Χρηματοοικονομικής Θέσης (Ποσά σε χιλιάδες €)", 1000),
+    ("Ισολογισμός σε χιλ. ευρώ 2025 2024", 1000),
+    ("Κατάσταση Συνολικού Εισοδήματος (Ποσά σε ευρώ) 1.000.000", 1),
+    ("Consolidated income statement\n€ million 2025 2024", 1000000),
+    ("Consolidated income statement\n€ in millions 2025 2024", 1000000),
+    ("Income statement EURm 2025 2024", 1000000),
+])
+def test_unit_comes_from_declaration_not_round_amounts(text, scale):
+    from financial_workbench.documents import _unit
+    assert _unit(text) == ("EUR", scale)
+
+
+def test_undeclared_unit_is_not_guessed_from_amounts():
+    from financial_workbench.documents import _unit
+    assert _unit("Group EUR 1.000.000 2025 2024") is None
+    assert _unit("Statement of cash flows EUR 2025 2024 Cash 1.000") is None
+
+
+def _dated_page(doc, lines, rows, dates=("31.12.2025", "31.12.2024", "31.12.2025", "31.12.2024")):
+    page = doc.new_page(width=650, height=850)
+    for y, text in lines:
+        page.insert_text((40, y), text)
+    page.insert_text((355, 75), "GROUP", fontsize=8)
+    page.insert_text((505, 75), "COMPANY", fontsize=8)
+    for x, text in zip((330, 405, 480, 555), dates):
+        page.insert_text((x, 90), text, fontsize=8)
+    y = 130
+    for label, note, values in rows:
+        page.insert_text((40, y), label, fontsize=8)
+        if note:
+            # Base-14 fonts cannot draw Greek note suffixes such as 7.24α.
+            page.insert_text((270, y), note, fontsize=8,
+                             fontname="helv" if note.isascii() else "china-s")
+        for x, text in zip((330, 405, 480, 555), values):
+            page.insert_text((x, y), text, fontsize=8)
+        y += 18
+    return page
+
+
+def _aktor_like_pdf(path, income_unit="(AmountsinEuro)", balance_rows=()):
+    doc = pymupdf.open()
+    _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(AmountsinEuro)")], [
+        ("Cash and cash equivalents", "7.17", ("268.681.474", "106.554.606", "121.605.950", "33.123.855")),
+        ("Total Current Assets", "", ("1.504.190.595", "1.110.593.347", "229.283.911", "408.099.512")),
+        *balance_rows,
+    ])
+    _dated_page(doc, [(40, "2. Statement of Comprehensive Income"), (60, income_unit)], [
+        ("Sales", "6.31", ("1.394.998.664", "1.254.923.600", "349.523.000", "481.696.745")),
+        ("Operating results", "", ("72.650.399", "61.143.368", "(45.993.376)", "(333.600)")),
+    ])
+    doc.new_page().insert_text((40, 60), "5. General information")
+    _dated_page(doc, [(40, "7.9 Trade and other receivables")], [
+        ("Trade receivables", "", ("297.574.264", "359.358.867", "1.080", "124.697.047")),
+    ])
+    doc.save(path)
+    doc.close()
+
+
+def test_round_company_amount_keeps_euro_statement_in_euros(tmp_path, settings):
+    """AKTOR FY2025 draft regression: p.209 figures were exported 1,000x too large."""
+    pdf = tmp_path / "aktor-like.pdf"
+    _aktor_like_pdf(pdf)
+    pages, warnings = read_pdf(pdf, pdf.name)
+    assert not [w for w in warnings if "different units" in w]
+    income = [r for x in pages[1]["panels"] for r in x["rows"]]
+    assert {r["scale"] for r in income} == {1}
+    assert income[0]["unit_source"] == "declared on page 2"
+    note = [r for x in pages[3]["panels"] for r in x.get("note_rows", [])]
+    assert note and note[0]["scale"] == 1
+    assert note[0]["unit_source"] == "inherited from page 2"
+
+    async def no_model(messages, **kwargs):
+        raise AssertionError("Exact labels must not need the provider")
+
+    facts, _ = asyncio.run(extract(pages, settings, lambda *_: None, complete=no_model))
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in facts}
+    assert values[("income_statement_8", 2025)] == Decimal("1394.998664")
+    assert values[("income_statement_8", 2024)] == Decimal("1254.9236")
+    assert values[("income_statement_16", 2025)] == Decimal("72.650399")
+    assert values[("balance_sheet_8", 2025)] == Decimal("268.681474")
+
+
+def test_statements_with_different_declared_units_are_flagged(tmp_path):
+    pdf = tmp_path / "mixed.pdf"
+    _aktor_like_pdf(pdf, income_unit="(Amounts in EUR thousands)")
+    _, warnings = read_pdf(pdf, pdf.name)
+    assert any("different units" in w and "x1,000 on page(s) 2" in w for w in warnings)
+
+
+@pytest.mark.parametrize("text, kind", [
+    ("Annual Financial Report\n4.  Cash Flow Statement", "cash"),
+    ("4. Statement of Cash Flows (indirect method)", "cash"),
+    ("3. Statement of Changes in Equity", "equity"),
+    ("Consolidated statement of changes in shareholders' equity", "equity"),
+    ("ΚΑΤΑΣΤΑΣΗ ΤΑΜΕΙΑΚΩΝ ΡΟΩΝ", "cash"),
+    ("Κατάσταση Χρηματοοικονομικής Θέσης", "balance"),
+    ("Κατάσταση Συνολικού Εισοδήματος", "income"),
+    ("Κατάσταση Μεταβολών Ιδίων Κεφαλαίων", "equity"),
+])
+def test_numbered_and_greek_statement_titles(text, kind):
+    from financial_workbench.documents import _statement_title
+    assert _statement_title(text) == kind
+
+
+@pytest.mark.parametrize("header, year", [
+    ("31/12/2025", 2025), ("31.12.2025", 2025),
+    ("1/1-31/12/2025", 2025), ("01.01-31.12.2025", 2025),
+    ("1.1.-31.12.2025", 2025), ("01.01.2025-31.12.2025", 2025),
+    ("01.07.2024-30.06.2025", 2025),
+])
+def test_year_end_and_period_column_headers(header, year):
+    from financial_workbench.documents import DATE_PATTERN, _year
+    assert DATE_PATTERN.fullmatch(header) and _year(header) == year
+
+
+def test_model_cannot_shift_labels_onto_neighbouring_metrics(tmp_path, settings):
+    """AKTOR FY2025 draft: Groq shifted three liability rows by one metric."""
+    doc = pymupdf.open()
+    _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(AmountsinEuro)")], [
+        ("Contractual liabilities", "7.12", ("109.036.041", "138.929.845", "-", "76.420.002")),
+        ("Current income tax liabilities", "", ("5.539.829", "10.395.306", "-", "1.240.668")),
+        ("Current provisions for other liabilities and expenses", "7.25",
+         ("24.573.779", "-", "-", "-")),
+        ("Current liabilities to third parties", "7.24α", ("-", "70.179.158", "-", "-")),
+    ])
+    pdf = tmp_path / "liabilities.pdf"
+    doc.save(pdf)
+    doc.close()
+    pages, _ = read_pdf(pdf, pdf.name)
+    rows = [r for x in pages[0]["panels"] for r in x["rows"]]
+    shifted = dict(zip([r["row_id"] for r in rows], (
+        "balance_sheet_34", "balance_sheet_35", "balance_sheet_36", "balance_sheet_31")))
+
+    async def shifting_model(messages, **kwargs):
+        ids = [r["row_id"] for r in json.loads(messages[1]["content"])["rows"]]
+        return json.dumps({"mappings": [{"row_id": i, "metric_id": shifted[i]} for i in ids]})
+
+    with pytest.raises(ValueError, match="no grounded figures"):
+        asyncio.run(extract(pages, settings, lambda *_: None, complete=shifting_model))
+
+    correct = dict(zip([r["row_id"] for r in rows], (
+        "balance_sheet_36", "balance_sheet_34", "balance_sheet_35", "balance_sheet_36")))
+
+    async def correct_model(messages, **kwargs):
+        ids = [r["row_id"] for r in json.loads(messages[1]["content"])["rows"]]
+        return json.dumps({"mappings": [{"row_id": i, "metric_id": correct[i]} for i in ids]})
+
+    facts, rejected = asyncio.run(extract(pages, settings, lambda *_: None,
+                                          complete=correct_model))
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in facts}
+    assert values[("balance_sheet_34", 2025)] == Decimal("5.539829")
+    assert values[("balance_sheet_35", 2025)] == Decimal("24.573779")
+    # "Current liabilities to third parties" names no payable, so it cannot be trade payables.
+    assert any(r["row_label"] == "Current liabilities to third parties"
+               and r["metric_id"] == "balance_sheet_31" for r in
+               asyncio.run(extract(pages, settings, lambda *_: None,
+                                   complete=shifting_model_31(rows)))[1])
+
+
+def shifting_model_31(rows):
+    async def model(messages, **kwargs):
+        return json.dumps({"mappings": [
+            {"row_id": rows[1]["row_id"], "metric_id": "balance_sheet_34"},
+            {"row_id": rows[3]["row_id"], "metric_id": "balance_sheet_31"}]})
+    return model
+
+
+def test_saved_model_mappings_are_rechecked_without_provider():
+    saved = {"id": "a", "metric_id": "balance_sheet_34", "year": 2025, "value": "109.036041",
+             "document_id": "d", "page": 208, "panel": "full",
+             "mapping_source": "Groq label mapping", "row_label": "Contractual liabilities",
+             "section": "Current liabilities"}
+    kept = saved | {"id": "b", "metric_id": "balance_sheet_34", "value": "5.539829",
+                    "row_label": "Current income tax liabilities"}
+    merged, removed = merge_evidence([saved, kept], [])
+    assert [f["id"] for f in merged] == ["b"] and [f["id"] for f in removed] == ["a"]
+
+
+def test_refresh_corrects_saved_scale_and_mappings_without_provider(tmp_path, monkeypatch):
+    """Repair a saved AKTOR-style job in place: no new Groq request, no re-upload."""
+    import hashlib
+    import financial_workbench.api as workbench_api
+
+    combined = tmp_path / "Report-2025Y-AKTOR-GROUP.pdf"
+    _aktor_like_pdf(combined, balance_rows=(
+        ("Committed deposit accounts", "7.17a", ("54.976.214", "42.382.864", "100.000", "3.282.005")),
+        ("Contractual liabilities", "7.12", ("109.036.041", "138.929.845", "-", "76.420.002")),
+    ))
+    digest = hashlib.sha256(combined.read_bytes()).hexdigest()
+    settings = Settings(company="aktor", latest_year=2025)
+    old = lambda metric, value, label, page, source="exact label": {  # noqa: E731
+        "id": f"{metric}-{page}", "metric_id": metric, "year": 2025, "value": value,
+        "document_id": digest, "file": combined.name, "page": page, "panel": "full",
+        "row_label": label, "section": "", "mapping_source": source, "status": "candidate"}
+    wrong_revenue = old("income_statement_8", "1394998.664", "Sales", 2)
+    saved = {
+        "id": "f" * 32, "status": "ready", "settings": settings.model_dump(),
+        "files": [{"name": combined.name, "path": str(combined)}], "pages": [],
+        "candidates": [wrong_revenue,
+                       old("balance_sheet_15", "54.976214", "Committed deposit accounts 7.17a", 1,
+                           "Groq label mapping"),
+                       old("balance_sheet_34", "109.036041", "Contractual liabilities", 1,
+                           "Groq label mapping")],
+        "rejected": [], "decisions": [{**wrong_revenue, "manual": False, "note": ""}],
+        "checks": [], "reported_measures": [], "coverage": [], "investigations": [],
+        "scenarios": None, "warnings": [], "progress": {"done": 0, "total": 0}, "error": None,
+    }
+
+    async def no_provider(*_args, **_kwargs):
+        raise AssertionError("Refresh must not contact Groq")
+
+    monkeypatch.setattr(workbench_api, "completion", no_provider)
+    monkeypatch.setattr("financial_workbench.engine.completion", no_provider)
+    with TestClient(create_app(tmp_path / "data", start_worker=False)) as client:
+        client.app.state.store.put(saved)
+        response = client.post(f"/api/jobs/{saved['id']}/refresh-evidence")
+        assert response.status_code == 200, response.text
+        job = response.json()
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in job["candidates"]}
+    assert values[("income_statement_8", 2025)] == Decimal("1394.998664")
+    assert values[("balance_sheet_15", 2025)] == Decimal("54.976214")
+    assert ("balance_sheet_34", 2025) not in values
+    assert job["status"] == "review" and job["decisions"] == []
+    assert any("Revenue 2025" in w and "1394998.664" in w for w in job["warnings"])
+    assert any(r["row_label"] == "Contractual liabilities" and r["metric_id"] == "balance_sheet_34"
+               for r in job["rejected"])

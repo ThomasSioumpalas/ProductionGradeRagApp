@@ -63,7 +63,7 @@ export const copy = {
     recalc:
       "The full template is retained. Missing data and analyst assumptions remain blank; dependent KPIs show n.a. Formulas recalculate in Excel or LibreOffice.",
     recheckTitle: "Search the saved reports again",
-    recheckHelp: "Find figures in dated financial notes and directors' disclosures without another Groq request or PDF upload. Saved review selections are retained.",
+    recheckHelp: "Re-read the saved PDFs with the current parser, reusing this job's earlier label classifications, without another Groq request or PDF upload. A reviewed selection is kept only if the re-read finds the same value; changed ones return to review with a warning.",
     recheck: "Recheck source evidence",
     recheckDone: "Saved reports rechecked; review the newly cited inputs and KPI definitions.",
     coverageTitle: "KPI evidence and gaps",
@@ -202,7 +202,7 @@ export const copy = {
     recalc:
       "Διατηρείται ολόκληρο το πρότυπο. Ελλείποντα στοιχεία και παραδοχές παραμένουν κενά· οι αντίστοιχοι δείκτες εμφανίζουν n.a. Οι τύποι υπολογίζονται στο Excel ή LibreOffice.",
     recheckTitle: "Νέος έλεγχος αποθηκευμένων εκθέσεων",
-    recheckHelp: "Αναζήτηση στις χρονολογημένες σημειώσεις χωρίς νέο αίτημα Groq ή νέα μεταφόρτωση. Οι επιλογές ελέγχου διατηρούνται.",
+    recheckHelp: "Νέα ανάγνωση των αποθηκευμένων PDF με τον τρέχοντα αναλυτή, με επαναχρήση των προηγούμενων ταξινομήσεων γραμμών, χωρίς νέο αίτημα Groq ή νέα μεταφόρτωση. Μια επιλογή ελέγχου διατηρείται μόνο αν βρεθεί η ίδια τιμή· όσες άλλαξαν επιστρέφουν για έλεγχο με προειδοποίηση.",
     recheck: "Επανέλεγχος τεκμηρίωσης",
     recheckDone: "Οι εκθέσεις ελέγχθηκαν ξανά. Εξετάστε τα νέα στοιχεία και τους ορισμούς των δεικτών.",
     coverageTitle: "Τεκμηρίωση και κενά δεικτών",
