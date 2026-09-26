@@ -509,8 +509,29 @@ def _candidates_from_row(row, metric_id, source, pages_by_source, settings, reje
     return candidates
 
 
-async def extract(pages, settings: Settings, progress, complete=completion, plan=None):
-    """Map printed row labels; copy every numeric token from a known PDF column."""
+def saved_label_key(document_id, page, label):
+    """Identify a printed row across re-reads, ignoring its note reference."""
+    return (document_id, page, re.sub(r"(?:\s+\d+)+[a-zα-ω]?$", "", _label(label)))
+
+
+def saved_model_mappings(candidates):
+    """Earlier model label mappings, reusable when the same PDF is re-read."""
+    known = {}
+    for c in candidates:
+        if c.get("mapping_source") == "Groq label mapping" and c.get("row_label"):
+            known.setdefault(saved_label_key(c.get("document_id"), c.get("page"),
+                                             c["row_label"]), set()).add(c["metric_id"])
+    return {key: next(iter(ids)) for key, ids in known.items() if len(ids) == 1}
+
+
+async def extract(pages, settings: Settings, progress, complete=completion, plan=None,
+                  known=None):
+    """Map printed row labels; copy every numeric token from a known PDF column.
+
+    With ``known`` (from saved_model_mappings) no provider request is made:
+    unfamiliar labels reuse an earlier model mapping for the same printed row
+    on the same page, re-checked by the local rules, or stay unmapped.
+    """
     plan = plan or statement_plan(pages)
     panels, _ = plan
     if not panels:
@@ -521,7 +542,19 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
     }
     rejected, candidates = [], []
     mapped = [(row, metric_id, "exact label") for row in rows if (metric_id := _alias(row))]
-    tasks = mapping_tasks(plan)
+    tasks = mapping_tasks(plan) if known is None else []
+    for row in rows if known is not None else []:
+        if _alias(row) or len(row["label"]) < 4:
+            continue
+        metric_id = known.get(saved_label_key(row["document_id"], row["page"], row["label"]))
+        reason = ("No saved model mapping for this label; retry the job to classify it"
+                  if metric_id is None else model_mapping_rejection(row["label"], metric_id))
+        if reason:
+            rejected.append({"file": row["file"], "page": row["page"], "row_label": row["label"],
+                             "metric_id": metric_id, "reason": reason if metric_id is None
+                             else f"Model label mapping rejected: {reason}"})
+            continue
+        mapped.append((row, metric_id, "Groq label mapping"))
     progress(0, len(tasks))
     done, index = 0, 0
     while index < len(tasks):

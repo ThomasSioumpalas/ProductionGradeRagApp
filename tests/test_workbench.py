@@ -1007,11 +1007,12 @@ def _dated_page(doc, lines, rows, dates=("31.12.2025", "31.12.2024", "31.12.2025
     return page
 
 
-def _aktor_like_pdf(path, income_unit="(AmountsinEuro)"):
+def _aktor_like_pdf(path, income_unit="(AmountsinEuro)", balance_rows=()):
     doc = pymupdf.open()
     _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(AmountsinEuro)")], [
         ("Cash and cash equivalents", "7.17", ("268.681.474", "106.554.606", "121.605.950", "33.123.855")),
         ("Total Current Assets", "", ("1.504.190.595", "1.110.593.347", "229.283.911", "408.099.512")),
+        *balance_rows,
     ])
     _dated_page(doc, [(40, "2. Statement of Comprehensive Income"), (60, income_unit)], [
         ("Sales", "6.31", ("1.394.998.664", "1.254.923.600", "349.523.000", "481.696.745")),
@@ -1143,3 +1144,53 @@ def test_saved_model_mappings_are_rechecked_without_provider():
                     "row_label": "Current income tax liabilities"}
     merged, removed = merge_evidence([saved, kept], [])
     assert [f["id"] for f in merged] == ["b"] and [f["id"] for f in removed] == ["a"]
+
+
+def test_refresh_corrects_saved_scale_and_mappings_without_provider(tmp_path, monkeypatch):
+    """Repair a saved AKTOR-style job in place: no new Groq request, no re-upload."""
+    import hashlib
+    import financial_workbench.api as workbench_api
+
+    combined = tmp_path / "Report-2025Y-AKTOR-GROUP.pdf"
+    _aktor_like_pdf(combined, balance_rows=(
+        ("Committed deposit accounts", "7.17a", ("54.976.214", "42.382.864", "100.000", "3.282.005")),
+        ("Contractual liabilities", "7.12", ("109.036.041", "138.929.845", "-", "76.420.002")),
+    ))
+    digest = hashlib.sha256(combined.read_bytes()).hexdigest()
+    settings = Settings(company="aktor", latest_year=2025)
+    old = lambda metric, value, label, page, source="exact label": {  # noqa: E731
+        "id": f"{metric}-{page}", "metric_id": metric, "year": 2025, "value": value,
+        "document_id": digest, "file": combined.name, "page": page, "panel": "full",
+        "row_label": label, "section": "", "mapping_source": source, "status": "candidate"}
+    wrong_revenue = old("income_statement_8", "1394998.664", "Sales", 2)
+    saved = {
+        "id": "f" * 32, "status": "ready", "settings": settings.model_dump(),
+        "files": [{"name": combined.name, "path": str(combined)}], "pages": [],
+        "candidates": [wrong_revenue,
+                       old("balance_sheet_15", "54.976214", "Committed deposit accounts 7.17a", 1,
+                           "Groq label mapping"),
+                       old("balance_sheet_34", "109.036041", "Contractual liabilities", 1,
+                           "Groq label mapping")],
+        "rejected": [], "decisions": [{**wrong_revenue, "manual": False, "note": ""}],
+        "checks": [], "reported_measures": [], "coverage": [], "investigations": [],
+        "scenarios": None, "warnings": [], "progress": {"done": 0, "total": 0}, "error": None,
+    }
+
+    async def no_provider(*_args, **_kwargs):
+        raise AssertionError("Refresh must not contact Groq")
+
+    monkeypatch.setattr(workbench_api, "completion", no_provider)
+    monkeypatch.setattr("financial_workbench.engine.completion", no_provider)
+    with TestClient(create_app(tmp_path / "data", start_worker=False)) as client:
+        client.app.state.store.put(saved)
+        response = client.post(f"/api/jobs/{saved['id']}/refresh-evidence")
+        assert response.status_code == 200, response.text
+        job = response.json()
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in job["candidates"]}
+    assert values[("income_statement_8", 2025)] == Decimal("1394.998664")
+    assert values[("balance_sheet_15", 2025)] == Decimal("54.976214")
+    assert ("balance_sheet_34", 2025) not in values
+    assert job["status"] == "review" and job["decisions"] == []
+    assert any("Revenue 2025" in w and "1394998.664" in w for w in job["warnings"])
+    assert any(r["row_label"] == "Contractual liabilities" and r["metric_id"] == "balance_sheet_34"
+               for r in job["rejected"])
