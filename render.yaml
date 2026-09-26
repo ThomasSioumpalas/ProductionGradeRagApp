@@ -1,0 +1,41 @@
+# Render Blueprint: New → Blueprint → select this repository. Render builds
+# Dockerfile.public from feat/bilingual-financial-workbooks, serves it over
+# HTTPS at https://<name>.onrender.com and redeploys on every push.
+services:
+  - type: web
+    name: financial-workbench
+    runtime: docker
+    dockerfilePath: ./Dockerfile.public
+    dockerContext: .
+    branch: feat/bilingual-financial-workbooks
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false  # entered once in the Render dashboard; never committed
+      - key: GROQ_EXTRACTION_MODEL
+        value: openai/gpt-oss-120b
+      - key: WORKBENCH_PUBLIC
+        value: "true"
+      # Public limits (per browser unless stated). Lower them to spend less.
+      - key: WORKBENCH_MAX_ACTIVE_JOBS_PER_VISITOR
+        value: "1"
+      - key: WORKBENCH_MAX_JOBS_PER_VISITOR_PER_DAY
+        value: "5"
+      - key: WORKBENCH_MAX_JOBS_PER_DAY
+        value: "50"
+      - key: WORKBENCH_MAX_QUEUED_JOBS
+        value: "10"
+      - key: WORKBENCH_MAX_QUESTIONS_PER_VISITOR_PER_DAY
+        value: "20"
+      - key: WORKBENCH_DAILY_PROVIDER_REQUESTS
+        value: "300"
+      - key: WORKBENCH_MAX_PROVIDER_WAIT
+        value: "30"
+      - key: WORKBENCH_RETENTION_HOURS
+        value: "24"
+      - key: WORKBENCH_MAX_PDF_MB
+        value: "40"
+      - key: WORKBENCH_MAX_UPLOAD_MB
+        value: "100"

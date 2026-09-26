@@ -100,6 +100,12 @@ main {
   background: radial-gradient(circle at 85% 20%, #216174 0%, #144151 32%, #102d40 80%);
 }
 .hero .eyebrow { color: #8ee7cf; }
+.hero .public-note {
+  margin-top: 14px;
+  font-size: 0.88rem;
+  opacity: 0.85;
+  max-width: 62ch;
+}
 .eyebrow {
   font-size: 10px;
   font-weight: 800;

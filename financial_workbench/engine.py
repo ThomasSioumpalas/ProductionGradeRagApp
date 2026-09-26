@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .documents import statement_plan
-from .llm import IncompleteOutputError, completion
+from .llm import IncompleteOutputError, ProviderUnavailable, completion
 from .models import ExtractedFact, RowMappings, Settings
 
 CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text())
@@ -448,12 +448,18 @@ def validate_fact(fact, page, settings):
     }
 
 
-def mapping_tasks(plan):
-    return [
-        [row for row in task if not _alias(row) and len(row["label"]) >= 4]
-        for task in plan[1]
-        if any(not _alias(row) and len(row["label"]) >= 4 for row in task)
-    ]
+def mapping_tasks(plan, settled=frozenset()):
+    """Provider requests for unfamiliar labels, skipping rows already settled locally.
+
+    ``settled`` holds (document_id, page, row_id) of lines that a reconciled
+    statement section has classified by rule; asking a model about them would
+    cost tokens without changing any figure.
+    """
+    def needs_model(row):
+        return (not _alias(row) and len(row["label"]) >= 4
+                and not (settled and (row.get("document_id"), row.get("page"), row.get("row_id")) in settled))
+    return [[row for row in task if needs_model(row)] for task in plan[1]
+            if any(needs_model(row) for row in task)]
 
 
 def _separator(raw):
@@ -525,7 +531,7 @@ def saved_model_mappings(candidates):
 
 
 async def extract(pages, settings: Settings, progress, complete=completion, plan=None,
-                  known=None):
+                  known=None, settled=frozenset()):
     """Map printed row labels; copy every numeric token from a known PDF column.
 
     With ``known`` (from saved_model_mappings) no provider request is made:
@@ -542,7 +548,7 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
     }
     rejected, candidates = [], []
     mapped = [(row, metric_id, "exact label") for row in rows if (metric_id := _alias(row))]
-    tasks = mapping_tasks(plan) if known is None else []
+    tasks = mapping_tasks(plan, settled) if known is None else []
     for row in rows if known is not None else []:
         if _alias(row) or len(row["label"]) < 4:
             continue
@@ -579,6 +585,13 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
         try:
             result = await complete(messages, structured=True, schema=RowMappings, max_tokens=500)
             matches = RowMappings.model_validate_json(result).mappings
+        except ProviderUnavailable as exc:
+            # Keep every local and reconciled figure; unfamiliar lines stay unmapped.
+            rejected.extend({"file": row["file"], "page": row["page"], "row_label": row["label"],
+                             "metric_id": None,
+                             "reason": f"AI label classification skipped: {exc}"}
+                            for pending in tasks[index:] for row in pending)
+            break
         except IncompleteOutputError as exc:
             if exc.reason != "length" or len(task) < 2:
                 raise

@@ -17,7 +17,23 @@ class IncompleteOutputError(ProviderError):
         self.reason = reason
 
 
+class ProviderUnavailable(ProviderError):
+    """The site's AI allowance is spent, or the provider asks for a long wait.
+
+    Extraction continues without model label classification; questions are
+    refused. A public site must not hold its single worker for a daily reset.
+    """
+
+
 MAX_PROVIDER_ATTEMPTS = 8
+# Optional callable returning True when one more provider request is allowed
+# (set by the API when public limits are enabled).
+_request_budget = None
+
+
+def set_request_budget(check):
+    global _request_budget
+    _request_budget = check
 
 
 def retry_delay(response, attempt):
@@ -55,6 +71,11 @@ async def completion(messages, structured=False, schema=None, max_tokens=None):
         raise ProviderError(
             "Set GROQ_API_KEY on the backend before extracting or asking questions."
         )
+    if _request_budget is not None and not _request_budget():
+        raise ProviderUnavailable(
+            "This site's daily AI allowance is used up; try again tomorrow (UTC)."
+        )
+    max_wait = float(os.getenv("WORKBENCH_MAX_PROVIDER_WAIT", "86400"))
     body = {
         "model": os.getenv("GROQ_EXTRACTION_MODEL", "openai/gpt-oss-120b"),
         "messages": messages,
@@ -98,6 +119,10 @@ async def completion(messages, structured=False, schema=None, max_tokens=None):
                 response.status_code == 429 or response.status_code >= 500
             ) and attempt < MAX_PROVIDER_ATTEMPTS - 1:
                 delay = retry_delay(response, attempt)
+                if delay > max_wait:
+                    raise ProviderUnavailable(
+                        f"The model provider asks to wait {delay:.0f} seconds (rate limit)."
+                    )
                 await asyncio.sleep(delay)
                 continue
             if response.is_error:

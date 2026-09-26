@@ -5,6 +5,8 @@ export const copy = {
     title: "Your reports. One clear financial model.",
     intro:
       "Upload annual reports, review the evidence, and take a complete analysis workbook with you.",
+    publicNotice:
+      "Public service: your analyses are visible only in this browser and are deleted after {hours} hours — download your workbook. PDFs are processed on this server; unfamiliar row labels (never amounts) may be sent to Groq for classification. Figures are drafts to verify against the cited pages, not investment advice.",
     new: "New analysis",
     company: "Company label in Excel",
     year: "Latest fiscal year",
@@ -144,6 +146,8 @@ export const copy = {
     title: "Οι εκθέσεις σας. Ένα ολοκληρωμένο οικονομικό μοντέλο.",
     intro:
       "Ανεβάστε ετήσιες εκθέσεις, ελέγξτε τις πηγές και κατεβάστε το πλήρες αρχείο ανάλυσης.",
+    publicNotice:
+      "Δημόσια υπηρεσία: οι αναλύσεις σας εμφανίζονται μόνο σε αυτόν τον περιηγητή και διαγράφονται μετά από {hours} ώρες — κατεβάστε το αρχείο σας. Τα PDF επεξεργάζονται σε αυτόν τον διακομιστή· άγνωστες ετικέτες γραμμών (ποτέ ποσά) μπορεί να σταλούν στο Groq για ταξινόμηση. Τα στοιχεία είναι προσχέδιο προς επαλήθευση με τις σελίδες πηγής, όχι επενδυτική συμβουλή.",
     new: "Νέα ανάλυση",
     company: "Επωνυμία όπως θα εμφανιστεί στο Excel",
     year: "Τελευταία οικονομική χρήση",

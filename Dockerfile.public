@@ -1,0 +1,25 @@
+# Public single-container image: the React interface and the API on one HTTPS
+# origin. Used by render.yaml; any Docker host that sets $PORT works.
+FROM node:24-alpine AS ui
+WORKDIR /ui
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements-workbench.lock .
+RUN pip install --no-cache-dir -r requirements-workbench.lock
+COPY financial_workbench ./financial_workbench
+COPY --from=ui /ui/dist ./static
+RUN useradd --create-home app && mkdir -p /data && chown app /data
+USER app
+ENV WORKBENCH_DATA_DIR=/data \
+    WORKBENCH_STATIC_DIR=/app/static \
+    WORKBENCH_PUBLIC=true \
+    PORT=8000
+EXPOSE 8000
+HEALTHCHECK CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/api/health')"
+# One worker: jobs are processed by an in-process queue.
+CMD ["sh", "-c", "exec python -m uvicorn financial_workbench.api:app --host 0.0.0.0 --port \"$PORT\" --workers 1 --proxy-headers --forwarded-allow-ips='*'"]

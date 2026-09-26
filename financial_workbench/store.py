@@ -1,4 +1,4 @@
-"""SQLite persistence for a single local worker; jobs survive browser refreshes."""
+"""SQLite persistence for a single worker; jobs survive browser refreshes."""
 
 import json
 import re
@@ -16,6 +16,11 @@ class Store:
             c.execute("PRAGMA journal_mode=WAL")
             c.execute(
                 "CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, updated REAL, payload TEXT)"
+            )
+            # Daily counters (per visitor and site-wide) for the public limits.
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS usage (day TEXT, key TEXT, count INTEGER, "
+                "PRIMARY KEY(day, key))"
             )
             c.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS evidence USING fts5("
@@ -51,6 +56,29 @@ class Store:
         with self.connect() as c:
             c.execute("DELETE FROM jobs WHERE id=?", (job_id,))
             c.execute("DELETE FROM evidence WHERE job_id=?", (job_id,))
+
+    @staticmethod
+    def today():
+        return time.strftime("%Y-%m-%d", time.gmtime())
+
+    def consume(self, key, limit):
+        """Count one use of ``key`` today unless ``limit`` is reached; True if allowed."""
+        day = self.today()
+        with self.connect() as c:
+            c.execute("INSERT INTO usage VALUES (?,?,0) ON CONFLICT(day,key) DO NOTHING", (day, key))
+            return c.execute("UPDATE usage SET count=count+1 WHERE day=? AND key=? AND count<?",
+                             (day, key, limit)).rowcount == 1
+
+    def usage(self, key):
+        with self.connect() as c:
+            row = c.execute("SELECT count FROM usage WHERE day=? AND key=?",
+                            (self.today(), key)).fetchone()
+        return row[0] if row else 0
+
+    def expired(self, cutoff):
+        """IDs of jobs last changed before ``cutoff`` (epoch seconds)."""
+        with self.connect() as c:
+            return [r[0] for r in c.execute("SELECT id FROM jobs WHERE updated < ?", (cutoff,))]
 
     def index_pages(self, job_id, pages):
         """Keep each PDF panel and every recognized row searchable across restarts."""
