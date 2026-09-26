@@ -18,6 +18,25 @@ The containers publish to localhost. This is a single-user workbench, not a mult
 
 Data survives container restarts in the `workbench_data` Docker volume. Delete an analysis in the UI to remove its PDFs and saved records. `docker compose ... down` retains that volume; `down -v` deletes it.
 
+## Publish on the internet (HTTPS)
+
+`Dockerfile.public` builds one container that serves the interface and the API from the same address; `render.yaml` deploys it on [Render](https://render.com) with automatic HTTPS.
+
+1. Sign in to Render with GitHub and allow access to this repository.
+2. **New → Blueprint**, choose this repository. Render reads `render.yaml` and creates the `financial-workbench` web service from `feat/bilingual-financial-workbooks`.
+3. When asked, paste your `GROQ_API_KEY` (stored by Render, never in the repository). Leave the other values or lower the limits.
+4. After the first build the site is live at `https://financial-workbench.onrender.com` (or the name Render assigns). Every push to the branch redeploys it. A custom domain can be added in the service's **Settings → Custom Domains**; Render issues its certificate.
+5. To appear in Google results, add the address in [Google Search Console](https://search.google.com/search-console) and request indexing. `robots.txt` allows the site and excludes `/api/`.
+
+With `WORKBENCH_PUBLIC=true` (set by the image):
+
+- Each browser receives an anonymous, random, HttpOnly cookie; only its hash is stored. Visitors see only their own analyses; another visitor's job answers "not found". Clearing cookies loses access.
+- Limits (all configurable in `render.yaml`): one running analysis and 5 uploads per browser per day, 50 uploads per day in total, 10 queued jobs, 20 questions and 10 rechecks per browser per day, and 300 Groq requests per day for the whole site. When the Groq allowance is spent, or Groq asks to wait more than 30 seconds, extraction continues without it: reconciled statement figures are unaffected and a warning explains that lines only a model could classify stay in "other" rows. Questions then return a clear message.
+- Analyses and their PDFs are deleted 24 hours after their last change.
+- The page shows a notice explaining this, that labels (never amounts) may be sent to Groq, and that figures are drafts to verify, not investment advice.
+
+Render's **free** plan sleeps after 15 minutes without visits (the next visit takes about a minute to wake) and its disk is temporary, so saved analyses can disappear on a restart or redeploy; users should download their workbook. A 306-page report needed about 160 MB of memory and 15 seconds on a normal CPU in testing; the free plan's slower CPU takes longer. For persistence, choose a paid plan and attach a disk mounted at `/data`. The same image runs on other Docker hosts that set `$PORT`.
+
 ## Local development (including Windows)
 
 Python 3.12+ and Node 24 are recommended for the pinned toolchain.

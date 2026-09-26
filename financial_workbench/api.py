@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import re
 import secrets
 import shutil
+import time
 import uuid
 from contextlib import asynccontextmanager
 from decimal import Decimal
@@ -15,6 +17,7 @@ from typing import Annotated
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .analysis import (check_reported_measures, enrich_financial_evidence,
@@ -24,7 +27,7 @@ from .engine import (CATALOG, METRICS, extract, mapping_tasks, provisional_decis
                      saved_model_mappings)
 from .forecast import operating_scenarios
 from .investigation import investigate_gaps
-from .llm import ProviderError, completion
+from .llm import ProviderError, ProviderUnavailable, completion, set_request_budget
 from .models import Question, Review, Settings
 from .statements import apply_statement_facts, settled_rows, statement_facts
 from .store import Store
@@ -32,12 +35,57 @@ from .workbook import export_workbook
 
 load_dotenv()
 log = logging.getLogger(__name__)
-MAX_BYTES = 40 * 1024 * 1024
-MAX_TOTAL_BYTES = 100 * 1024 * 1024
+VISITOR_COOKIE = "wb_visitor"
+
+
+def public_mode():
+    """A public deployment isolates visitors and enforces the limits below."""
+    return os.getenv("WORKBENCH_PUBLIC", "").strip().lower() in ("1", "true", "yes")
+
+
+def setting(name, default):
+    try:
+        return int(os.getenv(name, default))
+    except ValueError:
+        return default
+
+
+# Upload limits (MB) are configurable so a small public host can lower them.
+MAX_BYTES = setting("WORKBENCH_MAX_PDF_MB", 40) * 1024 * 1024
+MAX_TOTAL_BYTES = setting("WORKBENCH_MAX_UPLOAD_MB", 100) * 1024 * 1024
+PUBLIC_LIMITS = {
+    # name: (environment variable, default)
+    "active_per_visitor": ("WORKBENCH_MAX_ACTIVE_JOBS_PER_VISITOR", 1),
+    "jobs_per_visitor": ("WORKBENCH_MAX_JOBS_PER_VISITOR_PER_DAY", 5),
+    "jobs_per_day": ("WORKBENCH_MAX_JOBS_PER_DAY", 50),
+    "queue": ("WORKBENCH_MAX_QUEUED_JOBS", 10),
+    "questions_per_visitor": ("WORKBENCH_MAX_QUESTIONS_PER_VISITOR_PER_DAY", 20),
+    "rechecks_per_visitor": ("WORKBENCH_MAX_RECHECKS_PER_VISITOR_PER_DAY", 10),
+    "provider_requests": ("WORKBENCH_DAILY_PROVIDER_REQUESTS", 300),
+    "retention_hours": ("WORKBENCH_RETENTION_HOURS", 24),
+}
+
+
+def limit(name):
+    return setting(*PUBLIC_LIMITS[name])
+
+
+def remove_expired(store):
+    """Delete finished public jobs and their PDFs after the retention window."""
+    cutoff = time.time() - limit("retention_hours") * 3600
+    for job_id in store.expired(cutoff):
+        job = store.get(job_id)
+        if job and job["status"] not in ("queued", "extracting", "enriching"):
+            shutil.rmtree(store.root / job_id, ignore_errors=True)
+            store.delete(job_id)
 
 
 async def worker(app):
+    last_cleanup = 0.0
     while True:
+        if public_mode() and time.time() - last_cleanup > 600:
+            await asyncio.to_thread(remove_expired, app.state.store)
+            last_cleanup = time.time()
         pending = [j for j in app.state.store.all() if j["status"] == "queued"]
         if not pending:
             await asyncio.sleep(1)
@@ -100,6 +148,12 @@ async def worker(app):
                     "No dated statement table could be parsed. Review financial note leads "
                     "and the original PDF; run OCR if the statement pages are image-only."
                 )
+            skipped_ai = next((r["reason"] for r in rejected
+                               if r["reason"].startswith("AI label classification skipped")), None)
+            if skipped_ai:
+                job["warnings"].append(
+                    f"{skipped_ai} Reconciled statement figures are unaffected; lines only a "
+                    "model could classify stay in the statement's 'other' rows.")
             settings = Settings(**job["settings"])
             additions, reported = enrich_financial_evidence(
                 pages, settings, search=lambda q, **kw: app.state.store.search(job["id"], q, **kw)
@@ -187,36 +241,74 @@ def create_app(root=None, start_worker=True):
     app = FastAPI(title="Financial Workbench", lifespan=lifespan)
     auth = [Depends(authorize)]
 
-    def get_job(job_id):
+    def provider_budget():
+        return not public_mode() or app.state.store.consume(
+            "provider", limit("provider_requests"))
+
+    set_request_budget(provider_budget)
+
+    @app.middleware("http")
+    async def visitor_and_headers(request: Request, call_next):
+        # An anonymous, random, HttpOnly cookie ties jobs to one browser. Only
+        # its hash is stored; nothing identifies the person.
+        token = request.cookies.get(VISITOR_COOKIE, "")
+        fresh = not re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
+        if fresh:
+            token = secrets.token_urlsafe(32)
+        request.state.visitor = hashlib.sha256(token.encode()).hexdigest()
+        response = await call_next(request)
+        https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+        if fresh and request.url.path.startswith("/api/"):
+            response.set_cookie(VISITOR_COOKIE, token, max_age=30 * 86400, httponly=True,
+                                samesite="lax", secure=https, path="/")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        if https:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return response
+
+    def owns(job, request):
+        return not public_mode() or job.get("owner") == request.state.visitor
+
+    def get_job(job_id, request):
         if not re.fullmatch(r"[a-f0-9]{32}", job_id):
             raise HTTPException(404, "Job not found")
         job = app.state.store.get(job_id)
-        if not job:
+        # Another visitor's job is indistinguishable from a missing one.
+        if not job or not owns(job, request):
             raise HTTPException(404, "Job not found")
         return job
 
+    def within(key, name, message):
+        if public_mode() and not app.state.store.consume(key, limit(name)):
+            raise HTTPException(429, message)
+
     def public(job):
-        return {k: v for k, v in job.items() if k not in ("pages", "files")} | {
+        return {k: v for k, v in job.items() if k not in ("pages", "files", "owner")} | {
             "files": [{"name": f["name"]} for f in job["files"]]
         }
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "provider_configured": bool(os.getenv("GROQ_API_KEY"))}
+        return {"status": "ok", "provider_configured": bool(os.getenv("GROQ_API_KEY")),
+                "public": public_mode(),
+                "retention_hours": limit("retention_hours") if public_mode() else None}
 
     @app.get("/api/catalog", dependencies=auth)
     def catalog():
         return CATALOG
 
     @app.get("/api/jobs", dependencies=auth)
-    def jobs():
+    def jobs(request: Request):
         return [
             {k: public(j)[k] for k in ("id", "status", "settings", "updated")}
-            for j in app.state.store.all()
+            for j in app.state.store.all() if owns(j, request)
         ]
 
     @app.post("/api/jobs", status_code=202, dependencies=auth)
     async def upload(
+        request: Request,
         settings: Annotated[str, Form()], files: Annotated[list[UploadFile], File()]
     ):
         try:
@@ -229,6 +321,16 @@ def create_app(root=None, start_worker=True):
             raise HTTPException(422, "Upload between 1 and 10 PDFs.")
         if not os.getenv("GROQ_API_KEY"):
             raise HTTPException(503, "Set GROQ_API_KEY in the backend .env file first.")
+        if public_mode():
+            active = [j for j in app.state.store.all()
+                      if j["status"] in ("queued", "extracting", "enriching")]
+            if sum(j.get("owner") == request.state.visitor for j in active) >= limit("active_per_visitor"):
+                raise HTTPException(429, "Wait for your current analysis to finish first.")
+            if sum(j["status"] == "queued" for j in active) >= limit("queue"):
+                raise HTTPException(503, "The site is busy. Try again in a few minutes.")
+            within(f"jobs:{request.state.visitor}", "jobs_per_visitor",
+                   "Daily upload limit reached for this browser. Try again tomorrow (UTC).")
+            within("jobs", "jobs_per_day", "The site's daily upload limit is reached. Try again tomorrow (UTC).")
         job_id = uuid.uuid4().hex
         directory = app.state.store.root / job_id
         directory.mkdir()
@@ -249,7 +351,8 @@ def create_app(root=None, start_worker=True):
                         total += len(chunk)
                         if size > MAX_BYTES or total > MAX_TOTAL_BYTES:
                             raise HTTPException(
-                                413, "Limit: 40 MB per PDF and 100 MB per document set."
+                                413, f"Limit: {MAX_BYTES // 2**20} MB per PDF and "
+                                     f"{MAX_TOTAL_BYTES // 2**20} MB per document set."
                             )
                         out.write(chunk)
                 if size == 0:
@@ -257,6 +360,8 @@ def create_app(root=None, start_worker=True):
                 stored.append({"path": str(path), "name": name})
             job = {
                 "id": job_id,
+                "owner": request.state.visitor,
+                "created": time.time(),
                 "status": "queued",
                 "settings": config.model_dump(),
                 "files": stored,
@@ -283,14 +388,17 @@ def create_app(root=None, start_worker=True):
                 await f.close()
 
     @app.get("/api/jobs/{job_id}", dependencies=auth)
-    def detail(job_id: str):
-        return public(get_job(job_id))
+    def detail(job_id: str, request: Request):
+        return public(get_job(job_id, request))
 
     @app.post("/api/jobs/{job_id}/retry", dependencies=auth)
-    def retry(job_id: str):
-        job = get_job(job_id)
+    def retry(job_id: str, request: Request):
+        job = get_job(job_id, request)
         if job["status"] != "failed":
             raise HTTPException(409, "Only failed jobs can be retried.")
+        if public_mode() and any(j.get("owner") == request.state.visitor and j["status"] in (
+                "queued", "extracting", "enriching") for j in app.state.store.all()):
+            raise HTTPException(429, "Wait for your current analysis to finish first.")
         job.update(
             status="queued",
             error=None,
@@ -307,8 +415,8 @@ def create_app(root=None, start_worker=True):
         return public(job)
 
     @app.delete("/api/jobs/{job_id}", status_code=204, dependencies=auth)
-    def delete(job_id: str):
-        job = get_job(job_id)
+    def delete(job_id: str, request: Request):
+        job = get_job(job_id, request)
         if job["status"] in ("queued", "extracting", "enriching"):
             raise HTTPException(409, "Wait for extraction to finish before deleting.")
         shutil.rmtree(app.state.store.root / job_id, ignore_errors=True)
@@ -316,8 +424,8 @@ def create_app(root=None, start_worker=True):
         return Response(status_code=204)
 
     @app.get("/api/jobs/{job_id}/documents/{document_id}", dependencies=auth)
-    def document(job_id: str, document_id: str):
-        job = get_job(job_id)
+    def document(job_id: str, document_id: str, request: Request):
+        job = get_job(job_id, request)
         page = next((p for p in job["pages"] if p["sha256"] == document_id), None)
         if not page:
             raise HTTPException(404, "Document not found")
@@ -341,8 +449,8 @@ def create_app(root=None, start_worker=True):
         )
 
     @app.put("/api/jobs/{job_id}/review", dependencies=auth)
-    def review(job_id: str, payload: Review):
-        job = get_job(job_id)
+    def review(job_id: str, payload: Review, request: Request):
+        job = get_job(job_id, request)
         if job["status"] not in ("review", "ready"):
             raise HTTPException(409, "Extraction must finish first.")
         if not payload.decisions:
@@ -398,9 +506,9 @@ def create_app(root=None, start_worker=True):
         return public(job)
 
     @app.get("/api/jobs/{job_id}/workbook", dependencies=auth)
-    def download(job_id: str, language: str | None = None, draft: bool = False,
+    def download(job_id: str, request: Request, language: str | None = None, draft: bool = False,
                  shock_pp: Decimal = Decimal("5"), baseline_override: Decimal | None = None):
-        job = get_job(job_id)
+        job = get_job(job_id, request)
         if draft:
             if job["status"] not in ("review", "ready"):
                 raise HTTPException(409, "Wait for extraction before downloading a draft.")
@@ -434,9 +542,9 @@ def create_app(root=None, start_worker=True):
         )
 
     @app.get("/api/jobs/{job_id}/forecast", dependencies=auth)
-    def forecast(job_id: str, shock_pp: Decimal = Decimal("5"),
+    def forecast(job_id: str, request: Request, shock_pp: Decimal = Decimal("5"),
                  baseline_override: Decimal | None = None):
-        job = get_job(job_id)
+        job = get_job(job_id, request)
         if job["status"] not in ("review", "ready"):
             raise HTTPException(409, "Wait for financial extraction first.")
         settings = Settings(**job["settings"])
@@ -447,8 +555,8 @@ def create_app(root=None, start_worker=True):
             raise HTTPException(422, str(exc)) from exc
 
     @app.get("/api/jobs/{job_id}/audit", dependencies=auth)
-    def audit(job_id: str):
-        saved = get_job(job_id)
+    def audit(job_id: str, request: Request):
+        saved = get_job(job_id, request)
         job = public(saved)
         job["statement_evidence"] = [
             {"file": page["file"], "document_id": page["sha256"],
@@ -476,9 +584,9 @@ def create_app(root=None, start_worker=True):
         )
 
     @app.get("/api/jobs/{job_id}/evidence", dependencies=auth)
-    def evidence(job_id: str, page: int | None = None,
+    def evidence(job_id: str, request: Request, page: int | None = None,
                  document_id: str | None = None, side: str | None = None):
-        job = get_job(job_id)
+        job = get_job(job_id, request)
         if page is not None and page < 1:
             raise HTTPException(422, "Page must be positive")
         items = []
@@ -509,13 +617,15 @@ def create_app(root=None, start_worker=True):
         return {"items": items}
 
     @app.post("/api/jobs/{job_id}/refresh-evidence", dependencies=auth)
-    async def refresh_evidence(job_id: str):
+    async def refresh_evidence(job_id: str, request: Request):
         """Re-read saved PDFs and notes without sending another Groq request."""
-        job = get_job(job_id)
+        job = get_job(job_id, request)
         if job["status"] not in ("review", "ready", "failed"):
             raise HTTPException(409, "Wait for the running extraction to finish.")
         if not job.get("files") or any(not Path(f["path"]).is_file() for f in job["files"]):
             raise HTTPException(409, "Stored PDFs are missing. Upload the reports again.")
+        within(f"rechecks:{request.state.visitor}", "rechecks_per_visitor",
+               "Daily recheck limit reached for this browser. Try again tomorrow (UTC).")
         original_status = job["status"]
         job["status"] = "enriching"
         app.state.store.put(job)
@@ -592,8 +702,8 @@ def create_app(root=None, start_worker=True):
         return public(job)
 
     @app.get("/api/jobs/{job_id}/search", dependencies=auth)
-    def search(job_id: str, q: str):
-        job = get_job(job_id)
+    def search(job_id: str, q: str, request: Request):
+        job = get_job(job_id, request)
         if not job["pages"]:
             raise HTTPException(409, "PDF pages are not indexed yet")
         if not 2 <= len(q.strip()) <= 300:
@@ -601,10 +711,12 @@ def create_app(root=None, start_worker=True):
         return {"items": app.state.store.search(job_id, q, limit=12)}
 
     @app.post("/api/jobs/{job_id}/ask", dependencies=auth)
-    async def ask(job_id: str, payload: Question):
-        job = get_job(job_id)
+    async def ask(job_id: str, payload: Question, request: Request):
+        job = get_job(job_id, request)
         if not job["pages"]:
             raise HTTPException(409, "PDF pages are not indexed yet.")
+        within(f"questions:{request.state.visitor}", "questions_per_visitor",
+               "Daily question limit reached for this browser. Try again tomorrow (UTC).")
         matches = app.state.store.search(job_id, payload.question, limit=6)
         if not matches:
             return {"answer": "Δεν βρέθηκαν σχετικά αποσπάσματα." if payload.language == "el"
@@ -657,6 +769,8 @@ def create_app(root=None, start_worker=True):
                     },
                 ]
             )
+        except ProviderUnavailable as exc:
+            raise HTTPException(429, str(exc))
         except ProviderError as exc:
             raise HTTPException(502, str(exc))
         return {
@@ -664,6 +778,9 @@ def create_app(root=None, start_worker=True):
             "sources": [{k: v for k, v in c.items() if k != "text"} for c in contexts],
         }
 
+    static = os.getenv("WORKBENCH_STATIC_DIR")
+    if static and Path(static, "index.html").is_file():
+        app.mount("/", StaticFiles(directory=static, html=True), name="site")
     return app
 
 

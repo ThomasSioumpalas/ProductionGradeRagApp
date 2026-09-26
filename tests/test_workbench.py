@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -1500,3 +1501,132 @@ def test_worker_asks_model_only_about_unsettled_lines_and_exports_reconciled_row
     assert book["Changes in Equity"]["I15"].value == 410
     review = {(r[0].value, r[1].value): r[6].value for r in book["Export Review"].iter_rows(min_row=2)}
     assert review[("Liquid short-term investments", 2025)].startswith("No separate line")
+
+
+@pytest.fixture
+def public_app(tmp_path, monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
+    monkeypatch.setenv("WORKBENCH_PUBLIC", "true")
+    monkeypatch.delenv("WORKBENCH_API_KEY", raising=False)
+    app = create_app(tmp_path, start_worker=False)
+    with TestClient(app) as first:
+        yield app, first, TestClient(app)
+
+
+def _pdf_bytes():
+    d = pymupdf.open()
+    d.new_page().insert_text((40, 60), "Annual report 2025")
+    data = d.tobytes()
+    d.close()
+    return data
+
+
+def _post(client, settings, **headers):
+    return client.post("/api/jobs", data={"settings": settings.model_dump_json()},
+                       files=[("files", ("report.pdf", _pdf_bytes(), "application/pdf"))],
+                       headers=headers)
+
+
+def test_public_visitors_see_only_their_own_jobs(public_app, settings):
+    app, alice, bob = public_app
+    created = _post(alice, settings)
+    assert created.status_code == 202 and "owner" not in created.json()
+    assert created.headers["x-frame-options"] == "DENY"
+    # Behind the host's TLS proxy the cookie is Secure (a plain-HTTP client,
+    # like a browser, would then not send it back over HTTP).
+    cookie = TestClient(app).get("/api/health", headers={"x-forwarded-proto": "https"}).headers["set-cookie"]
+    assert "HttpOnly" in cookie and "samesite=lax" in cookie.lower() and "Secure" in cookie
+    job_id = created.json()["id"]
+    assert [j["id"] for j in alice.get("/api/jobs").json()] == [job_id]
+    assert bob.get("/api/jobs").json() == []
+    for method, path, body in (
+            ("get", "", None), ("get", "/audit", None), ("get", "/evidence", None),
+            ("get", "/workbook?draft=true", None), ("get", "/search?q=annual", None),
+            ("get", "/forecast", None), ("get", "/documents/" + "a" * 64, None),
+            ("post", "/retry", None), ("post", "/refresh-evidence", None),
+            ("post", "/ask", {"question": "What was revenue?"}),
+            ("put", "/review", {"decisions": [{"metric_id": "income_statement_8", "year": 2025,
+                                                "manual_value": "1", "note": "x"}]}),
+            ("delete", "", None)):
+        kwargs = {"json": body} if body is not None else {}
+        status = getattr(bob, method)(f"/api/jobs/{job_id}{path}", **kwargs).status_code
+        assert status == 404, (method, path, status)
+    assert alice.get(f"/api/jobs/{job_id}").status_code == 200
+
+
+def test_public_upload_and_question_limits(public_app, settings, monkeypatch):
+    app, alice, bob = public_app
+    assert _post(alice, settings).status_code == 202
+    # One analysis at a time per browser.
+    assert _post(alice, settings).status_code == 429
+    job = app.state.store.all()[0]
+    job.update(status="failed", pages=[{"page": 1}])
+    app.state.store.put(job)
+    monkeypatch.setenv("WORKBENCH_MAX_JOBS_PER_VISITOR_PER_DAY", "1")
+    response = _post(alice, settings)
+    assert response.status_code == 429 and "Daily upload limit" in response.json()["detail"]
+    assert _post(bob, settings).status_code == 202  # other visitors are unaffected
+    monkeypatch.setenv("WORKBENCH_MAX_QUESTIONS_PER_VISITOR_PER_DAY", "0")
+    asked = alice.post(f"/api/jobs/{job['id']}/ask", json={"question": "What was revenue?"})
+    assert asked.status_code == 429
+
+
+def test_public_ai_budget_keeps_local_extraction(tmp_path, monkeypatch):
+    """With the daily AI allowance spent, reconciled statements still fill the workbook."""
+    from financial_workbench.llm import set_request_budget
+    monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
+    pdf = tmp_path / "mini.pdf"
+    _mini_report(pdf)
+    pages, _ = read_pdf(pdf, pdf.name)
+    settings = Settings(company="Mini", latest_year=2025, money_scale=1)
+    set_request_budget(lambda: False)
+    try:
+        facts, rejected = asyncio.run(extract(pages, settings, lambda *_: None))
+    finally:
+        set_request_budget(None)
+    assert any(r["reason"].startswith("AI label classification skipped") for r in rejected)
+    assert {c["metric_id"] for c in facts} >= {"income_statement_8", "balance_sheet_8"}
+
+
+def test_public_provider_long_wait_is_not_held(monkeypatch):
+    import httpx
+
+    from financial_workbench.llm import ProviderUnavailable, completion
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
+    monkeypatch.setenv("WORKBENCH_MAX_PROVIDER_WAIT", "30")
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(
+        transport=httpx.MockTransport(lambda request: httpx.Response(
+            429, headers={"retry-after": "3600"}, json={"error": {"message": "daily tokens"}})),
+        **kwargs))
+    with pytest.raises(ProviderUnavailable, match="3601 seconds"):
+        asyncio.run(completion([{"role": "user", "content": "test"}]))
+
+
+def test_public_jobs_expire_after_retention(public_app, settings, monkeypatch):
+    from financial_workbench.api import remove_expired
+    app, alice, _ = public_app
+    finished = _post(alice, settings).json()["id"]
+    job = app.state.store.get(finished)
+    job["status"] = "review"
+    app.state.store.put(job)
+    with app.state.store.connect() as c:
+        c.execute("UPDATE jobs SET updated=?", (time.time() - 25 * 3600,))
+    remove_expired(app.state.store)
+    assert app.state.store.get(finished) is None
+    assert not (app.state.store.root / finished).exists()
+
+
+def test_public_site_is_served_with_the_api(tmp_path, monkeypatch):
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("<!doctype html><title>Financial Workbench</title>")
+    (site / "robots.txt").write_text("User-agent: *\nAllow: /\nDisallow: /api/\n")
+    monkeypatch.setenv("WORKBENCH_STATIC_DIR", str(site))
+    monkeypatch.setenv("WORKBENCH_PUBLIC", "true")
+    with TestClient(create_app(tmp_path / "data", start_worker=False)) as c:
+        assert "Financial Workbench" in c.get("/").text
+        assert "Disallow: /api/" in c.get("/robots.txt").text
+        health = c.get("/api/health").json()
+        assert health["public"] is True and health["retention_hours"] == 24

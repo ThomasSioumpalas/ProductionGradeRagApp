@@ -181,6 +181,13 @@ function App() {
     }
     return r;
   }
+  const [publicHours, setPublicHours] = useState<number | null>(null);
+  useEffect(() => {
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((h) => setPublicHours(h.public ? h.retention_hours : null))
+      .catch(() => setPublicHours(null));
+  }, []);
   async function refresh() {
     try {
       const [a, b] = await Promise.all([api("/catalog"), api("/jobs")]);
@@ -410,6 +417,11 @@ function App() {
           <span className="eyebrow">{t.tag}</span>
           <h1>{t.title}</h1>
           <p>{t.intro}</p>
+          {publicHours !== null && (
+            <p className="public-note">
+              {t.publicNotice.replace("{hours}", String(publicHours))}
+            </p>
+          )}
         </section>
         <div className="workspace">
           <aside>

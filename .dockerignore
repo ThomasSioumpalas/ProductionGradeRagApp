@@ -9,3 +9,7 @@ workbench_data
 __pycache__
 .pytest_cache
 .venv-workbench
+qdrant_data
+qdrant_storage
+tests
+*.pdf

@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .documents import statement_plan
-from .llm import IncompleteOutputError, completion
+from .llm import IncompleteOutputError, ProviderUnavailable, completion
 from .models import ExtractedFact, RowMappings, Settings
 
 CATALOG = json.loads((Path(__file__).parent / "catalog.json").read_text())
@@ -585,6 +585,13 @@ async def extract(pages, settings: Settings, progress, complete=completion, plan
         try:
             result = await complete(messages, structured=True, schema=RowMappings, max_tokens=500)
             matches = RowMappings.model_validate_json(result).mappings
+        except ProviderUnavailable as exc:
+            # Keep every local and reconciled figure; unfamiliar lines stay unmapped.
+            rejected.extend({"file": row["file"], "page": row["page"], "row_label": row["label"],
+                             "metric_id": None,
+                             "reason": f"AI label classification skipped: {exc}"}
+                            for pending in tasks[index:] for row in pending)
+            break
         except IncompleteOutputError as exc:
             if exc.reason != "length" or len(task) < 2:
                 raise
