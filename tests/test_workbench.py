@@ -956,3 +956,125 @@ def test_aktor_2025_primary_statements_and_note_bridges():
     book = export_workbook(settings, provisional_decisions(facts + added), [],
                            reviewed=False)
     assert book.startswith(b"PK")
+
+
+@pytest.mark.parametrize("text, scale", [
+    # AKTOR FY2025 p.209: "Amounts in Euro" header, round company amount 349.523.000.
+    ("2. Statement of Comprehensive Income\n(AmountsinEuro) GROUP COMPANY\n"
+     "Sales 6.31 1.394.998.664 1.254.923.600 349.523.000 481.696.745", 1),
+    ("Statement of profit or loss\nAmounts in euros\n2025 2024\nRevenue 1,000 2,500,000", 1),
+    ("Statement of financial position\nAmounts in Euro\nThe Group employs several thousand people", 1),
+    ("Statement of Profit or Loss\nIn 000's Euros", 1000),
+    ("Balance sheet\n€'000 2025 2024\nCash 1,000 900", 1000),
+    ("Balance sheet (Amounts in EUR thousands) 2025 2024", 1000),
+    ("Example SA. Consolidated. Annual 2025. EUR thousands.", 1000),
+    ("Κατάσταση Χρηματοοικονομικής Θέσης (Ποσά σε χιλιάδες €)", 1000),
+    ("Ισολογισμός σε χιλ. ευρώ 2025 2024", 1000),
+    ("Κατάσταση Συνολικού Εισοδήματος (Ποσά σε ευρώ) 1.000.000", 1),
+    ("Consolidated income statement\n€ million 2025 2024", 1000000),
+    ("Consolidated income statement\n€ in millions 2025 2024", 1000000),
+    ("Income statement EURm 2025 2024", 1000000),
+])
+def test_unit_comes_from_declaration_not_round_amounts(text, scale):
+    from financial_workbench.documents import _unit
+    assert _unit(text) == ("EUR", scale)
+
+
+def test_undeclared_unit_is_not_guessed_from_amounts():
+    from financial_workbench.documents import _unit
+    assert _unit("Group EUR 1.000.000 2025 2024") is None
+    assert _unit("Statement of cash flows EUR 2025 2024 Cash 1.000") is None
+
+
+def _dated_page(doc, lines, rows, dates=("31.12.2025", "31.12.2024", "31.12.2025", "31.12.2024")):
+    page = doc.new_page(width=650, height=850)
+    for y, text in lines:
+        page.insert_text((40, y), text)
+    page.insert_text((355, 75), "GROUP", fontsize=8)
+    page.insert_text((505, 75), "COMPANY", fontsize=8)
+    for x, text in zip((330, 405, 480, 555), dates):
+        page.insert_text((x, 90), text, fontsize=8)
+    y = 130
+    for label, note, values in rows:
+        page.insert_text((40, y), label, fontsize=8)
+        if note:
+            page.insert_text((270, y), note, fontsize=8)
+        for x, text in zip((330, 405, 480, 555), values):
+            page.insert_text((x, y), text, fontsize=8)
+        y += 18
+    return page
+
+
+def _aktor_like_pdf(path, income_unit="(AmountsinEuro)"):
+    doc = pymupdf.open()
+    _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(AmountsinEuro)")], [
+        ("Cash and cash equivalents", "7.17", ("268.681.474", "106.554.606", "121.605.950", "33.123.855")),
+        ("Total Current Assets", "", ("1.504.190.595", "1.110.593.347", "229.283.911", "408.099.512")),
+    ])
+    _dated_page(doc, [(40, "2. Statement of Comprehensive Income"), (60, income_unit)], [
+        ("Sales", "6.31", ("1.394.998.664", "1.254.923.600", "349.523.000", "481.696.745")),
+        ("Operating results", "", ("72.650.399", "61.143.368", "(45.993.376)", "(333.600)")),
+    ])
+    doc.new_page().insert_text((40, 60), "5. General information")
+    _dated_page(doc, [(40, "7.9 Trade and other receivables")], [
+        ("Trade receivables", "", ("297.574.264", "359.358.867", "1.080", "124.697.047")),
+    ])
+    doc.save(path)
+    doc.close()
+
+
+def test_round_company_amount_keeps_euro_statement_in_euros(tmp_path, settings):
+    """AKTOR FY2025 draft regression: p.209 figures were exported 1,000x too large."""
+    pdf = tmp_path / "aktor-like.pdf"
+    _aktor_like_pdf(pdf)
+    pages, warnings = read_pdf(pdf, pdf.name)
+    assert not [w for w in warnings if "different units" in w]
+    income = [r for x in pages[1]["panels"] for r in x["rows"]]
+    assert {r["scale"] for r in income} == {1}
+    assert income[0]["unit_source"] == "declared on page 2"
+    note = [r for x in pages[3]["panels"] for r in x.get("note_rows", [])]
+    assert note and note[0]["scale"] == 1
+    assert note[0]["unit_source"] == "inherited from page 2"
+
+    async def no_model(messages, **kwargs):
+        raise AssertionError("Exact labels must not need the provider")
+
+    facts, _ = asyncio.run(extract(pages, settings, lambda *_: None, complete=no_model))
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in facts}
+    assert values[("income_statement_8", 2025)] == Decimal("1394.998664")
+    assert values[("income_statement_8", 2024)] == Decimal("1254.9236")
+    assert values[("income_statement_16", 2025)] == Decimal("72.650399")
+    assert values[("balance_sheet_8", 2025)] == Decimal("268.681474")
+
+
+def test_statements_with_different_declared_units_are_flagged(tmp_path):
+    pdf = tmp_path / "mixed.pdf"
+    _aktor_like_pdf(pdf, income_unit="(Amounts in EUR thousands)")
+    _, warnings = read_pdf(pdf, pdf.name)
+    assert any("different units" in w and "x1,000 on page(s) 2" in w for w in warnings)
+
+
+@pytest.mark.parametrize("text, kind", [
+    ("Annual Financial Report\n4.  Cash Flow Statement", "cash"),
+    ("4. Statement of Cash Flows (indirect method)", "cash"),
+    ("3. Statement of Changes in Equity", "equity"),
+    ("Consolidated statement of changes in shareholders' equity", "equity"),
+    ("ΚΑΤΑΣΤΑΣΗ ΤΑΜΕΙΑΚΩΝ ΡΟΩΝ", "cash"),
+    ("Κατάσταση Χρηματοοικονομικής Θέσης", "balance"),
+    ("Κατάσταση Συνολικού Εισοδήματος", "income"),
+    ("Κατάσταση Μεταβολών Ιδίων Κεφαλαίων", "equity"),
+])
+def test_numbered_and_greek_statement_titles(text, kind):
+    from financial_workbench.documents import _statement_title
+    assert _statement_title(text) == kind
+
+
+@pytest.mark.parametrize("header, year", [
+    ("31/12/2025", 2025), ("31.12.2025", 2025),
+    ("1/1-31/12/2025", 2025), ("01.01-31.12.2025", 2025),
+    ("1.1.-31.12.2025", 2025), ("01.01.2025-31.12.2025", 2025),
+    ("01.07.2024-30.06.2025", 2025),
+])
+def test_year_end_and_period_column_headers(header, year):
+    from financial_workbench.documents import DATE_PATTERN, _year
+    assert DATE_PATTERN.fullmatch(header) and _year(header) == year
