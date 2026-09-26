@@ -221,7 +221,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
         if len(numbers) != len(headers) or (not include_unlabelled and not re.search(r"[^\W\d_]", label)):
             continue
         # Note references occupy the narrow gap just before the amount columns.
-        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:[.,]\d+)?[a-z]?", label_words[-1][4], re.I):
+        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:[.,]\d+)?[a-zα-ω]?", label_words[-1][4], re.I):
             label = " ".join(word[4] for word in label_words[:-1]).strip()
         values = []
         for header, word in zip(headers, numbers):

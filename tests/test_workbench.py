@@ -998,7 +998,9 @@ def _dated_page(doc, lines, rows, dates=("31.12.2025", "31.12.2024", "31.12.2025
     for label, note, values in rows:
         page.insert_text((40, y), label, fontsize=8)
         if note:
-            page.insert_text((270, y), note, fontsize=8)
+            # Base-14 fonts cannot draw Greek note suffixes such as 7.24α.
+            page.insert_text((270, y), note, fontsize=8,
+                             fontname="helv" if note.isascii() else "china-s")
         for x, text in zip((330, 405, 480, 555), values):
             page.insert_text((x, y), text, fontsize=8)
         y += 18
@@ -1078,3 +1080,66 @@ def test_numbered_and_greek_statement_titles(text, kind):
 def test_year_end_and_period_column_headers(header, year):
     from financial_workbench.documents import DATE_PATTERN, _year
     assert DATE_PATTERN.fullmatch(header) and _year(header) == year
+
+
+def test_model_cannot_shift_labels_onto_neighbouring_metrics(tmp_path, settings):
+    """AKTOR FY2025 draft: Groq shifted three liability rows by one metric."""
+    doc = pymupdf.open()
+    _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(AmountsinEuro)")], [
+        ("Contractual liabilities", "7.12", ("109.036.041", "138.929.845", "-", "76.420.002")),
+        ("Current income tax liabilities", "", ("5.539.829", "10.395.306", "-", "1.240.668")),
+        ("Current provisions for other liabilities and expenses", "7.25",
+         ("24.573.779", "-", "-", "-")),
+        ("Current liabilities to third parties", "7.24α", ("-", "70.179.158", "-", "-")),
+    ])
+    pdf = tmp_path / "liabilities.pdf"
+    doc.save(pdf)
+    doc.close()
+    pages, _ = read_pdf(pdf, pdf.name)
+    rows = [r for x in pages[0]["panels"] for r in x["rows"]]
+    shifted = dict(zip([r["row_id"] for r in rows], (
+        "balance_sheet_34", "balance_sheet_35", "balance_sheet_36", "balance_sheet_31")))
+
+    async def shifting_model(messages, **kwargs):
+        ids = [r["row_id"] for r in json.loads(messages[1]["content"])["rows"]]
+        return json.dumps({"mappings": [{"row_id": i, "metric_id": shifted[i]} for i in ids]})
+
+    with pytest.raises(ValueError, match="no grounded figures"):
+        asyncio.run(extract(pages, settings, lambda *_: None, complete=shifting_model))
+
+    correct = dict(zip([r["row_id"] for r in rows], (
+        "balance_sheet_36", "balance_sheet_34", "balance_sheet_35", "balance_sheet_36")))
+
+    async def correct_model(messages, **kwargs):
+        ids = [r["row_id"] for r in json.loads(messages[1]["content"])["rows"]]
+        return json.dumps({"mappings": [{"row_id": i, "metric_id": correct[i]} for i in ids]})
+
+    facts, rejected = asyncio.run(extract(pages, settings, lambda *_: None,
+                                          complete=correct_model))
+    values = {(c["metric_id"], c["year"]): Decimal(c["value"]) for c in facts}
+    assert values[("balance_sheet_34", 2025)] == Decimal("5.539829")
+    assert values[("balance_sheet_35", 2025)] == Decimal("24.573779")
+    # "Current liabilities to third parties" names no payable, so it cannot be trade payables.
+    assert any(r["row_label"] == "Current liabilities to third parties"
+               and r["metric_id"] == "balance_sheet_31" for r in
+               asyncio.run(extract(pages, settings, lambda *_: None,
+                                   complete=shifting_model_31(rows)))[1])
+
+
+def shifting_model_31(rows):
+    async def model(messages, **kwargs):
+        return json.dumps({"mappings": [
+            {"row_id": rows[1]["row_id"], "metric_id": "balance_sheet_34"},
+            {"row_id": rows[3]["row_id"], "metric_id": "balance_sheet_31"}]})
+    return model
+
+
+def test_saved_model_mappings_are_rechecked_without_provider():
+    saved = {"id": "a", "metric_id": "balance_sheet_34", "year": 2025, "value": "109.036041",
+             "document_id": "d", "page": 208, "panel": "full",
+             "mapping_source": "Groq label mapping", "row_label": "Contractual liabilities",
+             "section": "Current liabilities"}
+    kept = saved | {"id": "b", "metric_id": "balance_sheet_34", "value": "5.539829",
+                    "row_label": "Current income tax liabilities"}
+    merged, removed = merge_evidence([saved, kept], [])
+    assert [f["id"] for f in merged] == ["b"] and [f["id"] for f in removed] == ["a"]

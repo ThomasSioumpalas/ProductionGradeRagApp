@@ -11,7 +11,8 @@ import uuid
 from collections import defaultdict
 from decimal import Decimal
 
-from .engine import _candidates_from_row, _label, _meaning_allowed, _separator, parse_number
+from .engine import (_candidates_from_row, _label, _meaning_allowed, _separator,
+                     model_mapping_rejection, parse_number)
 
 
 def _amount(row, scope, year, settings, shares=False):
@@ -302,8 +303,9 @@ def merge_evidence(old, additions, selected_ids=()):
     removed = []
     for fact in old + additions:
         if (fact.get("mapping_source") == "Groq label mapping"
-                and not _meaning_allowed({"label": fact.get("row_label", ""),
-                                          "section": fact.get("section", "")}, fact["metric_id"])):
+                and (not _meaning_allowed({"label": fact.get("row_label", ""),
+                                           "section": fact.get("section", "")}, fact["metric_id"])
+                     or model_mapping_rejection(fact.get("row_label", ""), fact["metric_id"]))):
             if fact["id"] not in keep:
                 removed.append(fact)
                 continue
