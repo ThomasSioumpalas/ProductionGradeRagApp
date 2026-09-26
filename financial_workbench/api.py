@@ -26,6 +26,7 @@ from .forecast import operating_scenarios
 from .investigation import investigate_gaps
 from .llm import ProviderError, completion
 from .models import Question, Review, Settings
+from .statements import apply_statement_facts, settled_rows, statement_facts
 from .store import Store
 from .workbook import export_workbook
 
@@ -60,7 +61,8 @@ async def worker(app):
             job["warnings"] = warnings
             panels, row_batches = statement_plan(pages)
             extraction_plan_data = (panels, row_batches)
-            provider_tasks = mapping_tasks(extraction_plan_data)
+            settled = settled_rows(pages, Settings(**job["settings"]))
+            provider_tasks = mapping_tasks(extraction_plan_data, settled)
             app.state.store.index_pages(job["id"], pages)
             skipped = [
                 (page["page"], panel["side"])
@@ -87,7 +89,8 @@ async def worker(app):
 
             if panels:
                 candidates, rejected = await extract(
-                    pages, Settings(**job["settings"]), progress, plan=extraction_plan_data
+                    pages, Settings(**job["settings"]), progress, plan=extraction_plan_data,
+                    settled=settled,
                 )
             else:
                 # Preserve the indexed corpus and potential note evidence
@@ -101,7 +104,9 @@ async def worker(app):
             additions, reported = enrich_financial_evidence(
                 pages, settings, search=lambda q, **kw: app.state.store.search(job["id"], q, **kw)
             )
-            candidates, _ = merge_evidence(candidates, additions)
+            structured, statement_checks = statement_facts(pages, settings, candidates, additions)
+            candidates, _ = merge_evidence(apply_statement_facts(candidates, structured), additions)
+            job["statement_checks"] = statement_checks
             checked = check_reported_measures(candidates, reported)
             coverage = kpi_coverage(candidates, settings, checked)
             job.update(status="review", candidates=candidates, rejected=rejected,
@@ -450,7 +455,7 @@ def create_app(root=None, start_worker=True):
              "page": page["page"], "side": panel["side"],
              "statement": panel["statement"], "headers": panel["headers"],
              "currency": panel.get("currency"), "scale": panel.get("scale"),
-             "rows": panel["rows"]}
+             "rows": panel["rows"], "equity_rows": panel.get("equity_rows", [])}
             for page in saved["pages"] for panel in page.get("panels", [])
             if panel.get("statement")
         ]
@@ -538,7 +543,9 @@ def create_app(root=None, start_worker=True):
             added, reported = enrich_financial_evidence(
                 pages, settings, search=lambda q, **kw: app.state.store.search(job_id, q, **kw)
             )
-            candidates, invalid = merge_evidence(statement, added)
+            structured, statement_checks = statement_facts(pages, settings, statement, added)
+            candidates, invalid = merge_evidence(apply_statement_facts(statement, structured), added)
+            job["statement_checks"] = statement_checks
             decisions, changed = recheck_decisions(job["decisions"], candidates)
             for d, now in changed:
                 warnings.append(
@@ -548,8 +555,8 @@ def create_app(root=None, start_worker=True):
                     + ". Review it again.")
             unmapped = sum(r["reason"].startswith("No saved model mapping") for r in rejected)
             warnings.append(
-                f"Re-read {len(pages)} PDF pages without Groq: {len(statement)} statement and "
-                f"{len(added)} note candidates."
+                f"Re-read {len(pages)} PDF pages without Groq: {len(statement)} statement-line, "
+                f"{len(structured)} reconciled-statement and {len(added)} note candidates."
                 + (f" {unmapped} unfamiliar row labels had no earlier model mapping; retry the "
                    "job to classify them." if unmapped else ""))
             checked = check_reported_measures(candidates, reported)

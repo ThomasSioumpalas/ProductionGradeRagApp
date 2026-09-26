@@ -583,8 +583,8 @@ def test_worker_pdf_to_ready_without_network(tmp_path, monkeypatch, settings):
     async def fake_complete(*args, **kwargs):
         raise AssertionError("Exact printed labels must not require a Groq request")
 
-    async def extraction(pages, config, progress, plan=None):
-        return await extract(pages, config, progress, complete=fake_complete, plan=plan)
+    async def extraction(pages, config, progress, plan=None, **kwargs):
+        return await extract(pages, config, progress, complete=fake_complete, plan=plan, **kwargs)
 
     monkeypatch.setattr(api_module, "extract", extraction)
     with TestClient(create_app(tmp_path)) as client:
@@ -997,6 +997,9 @@ def _dated_page(doc, lines, rows, dates=("31.12.2025", "31.12.2024", "31.12.2025
     y = 130
     for label, note, values in rows:
         page.insert_text((40, y), label, fontsize=8)
+        if values is None:  # section heading without amounts
+            y += 18
+            continue
         if note:
             # Base-14 fonts cannot draw Greek note suffixes such as 7.24α.
             page.insert_text((270, y), note, fontsize=8,
@@ -1194,3 +1197,306 @@ def test_refresh_corrects_saved_scale_and_mappings_without_provider(tmp_path, mo
     assert any("Revenue 2025" in w and "1394998.664" in w for w in job["warnings"])
     assert any(r["row_label"] == "Contractual liabilities" and r["metric_id"] == "balance_sheet_34"
                for r in job["rejected"])
+
+
+def _two(v25, v24):
+    """Group and company columns with identical figures (only the group is read)."""
+    return (v25, v24, v25, v24)
+
+
+def _mini_report(path, payables_total="350"):
+    """A complete small annual report whose statements reconcile by construction."""
+    doc = pymupdf.open()
+    _dated_page(doc, [(40, "1. Statement of Financial Position"), (60, "(Amounts in Euro)")], [
+        ("Non-current assets", "", None),
+        ("Property, plant and equipment", "7.3", _two("500", "400")),
+        ("Investment property", "", _two("50", "40")),
+        ("Other financial assets", "", _two("30", "30")),
+        ("Current assets", "", None),
+        ("Inventories", "", _two("100", "90")),
+        ("Trade and other receivables", "7.9", _two("300", "280")),
+        ("Contract assets", "", _two("70", "60")),
+        ("Cash and cash equivalents", "", _two("200", "150")),
+        ("Total current assets", "", _two("670", "580")),
+        ("Total assets", "", _two("1.250", "1.050")),
+        ("Equity", "", None),
+        ("Share capital", "", _two("100", "100")),
+        ("Share premium", "", _two("50", "50")),
+        ("Reserves", "", _two("20", "15")),
+        ("Retained earnings", "", _two("230", "185")),
+        ("Non-controlling interests", "", _two("10", "10")),
+        ("Total equity", "", _two("410", "360")),
+        ("Non-current liabilities", "", None),
+        ("Borrowings", "", _two("300", "280")),
+        ("Deferred tax liabilities", "", _two("40", "30")),
+        ("Grants", "", _two("20", "20")),
+        ("Current liabilities", "", None),
+        ("Trade and other payables", "7.24", _two("350", "250")),
+        ("Borrowings", "", _two("100", "90")),
+        ("Current income tax liabilities", "", _two("30", "20")),
+        ("Total current liabilities", "", _two("480", "360")),
+        ("Total liabilities", "", _two("840", "690")),
+    ])
+    _dated_page(doc, [(40, "2. Statement of Comprehensive Income"), (60, "(Amounts in Euro)")], [
+        ("Sales", "", _two("1.000", "900")),
+        ("Cost of sales", "", _two("(700)", "(650)")),
+        ("Gross profit", "", _two("300", "250")),
+        ("Administrative expenses", "", _two("(100)", "(90)")),
+        ("Impairment of receivables", "", _two("(10)", "(5)")),
+        ("Other gains/(losses) - net", "", _two("(20)", "15")),
+        ("Operating results", "", _two("170", "170")),
+        ("Finance income", "", _two("5", "4")),
+        ("Finance expenses", "", _two("(35)", "(30)")),
+        ("Gain on disposal of subsidiary", "", _two("10", "-")),
+        ("Profit/(losses) before taxes", "", _two("150", "144")),
+        ("Income tax expense", "", _two("(40)", "(39)")),
+        ("Profit/(losses) net of taxes", "", _two("110", "105")),
+        ("Currency translation differences", "", _two("5", "(5)")),
+        ("Total comprehensive income net of taxes", "", _two("115", "100")),
+        ("Owners of the Parent", "", _two("108", "103")),
+        ("Non-controlling interests", "", _two("2", "2")),
+        ("Owners of the Parent", "", _two("113", "98")),
+        ("Non-controlling interests", "", _two("2", "2")),
+    ])
+    equity = doc.new_page(width=650, height=850)
+    equity.insert_text((40, 40), "3. Statement of Changes in Equity")
+    equity.insert_text((40, 60), "(Amounts in Euro)")
+    equity.insert_text((300, 75), "GROUP", fontsize=8)
+    for y, label, values in (
+            (110, "Balance at 1 January 2025", ("150", "15", "185", "10", "360")),
+            (128, "Net profit for the year", ("-", "-", "108", "2", "110")),
+            (146, "Currency translation differences", ("-", "5", "-", "-", "5")),
+            (164, "Total comprehensive income", ("-", "5", "108", "2", "115")),
+            (182, "Dividends", ("-", "-", "(63)", "(2)", "(65)")),
+            (200, "Balance at 31 December 2025", ("150", "20", "230", "10", "410"))):
+        equity.insert_text((40, y), label, fontsize=8)
+        for x, text in zip((300, 360, 420, 480, 560), values):
+            equity.insert_text((x, y), text, fontsize=8)
+    _dated_page(doc, [(40, "4. Cash Flow Statement"), (60, "(Amounts in Euro)")], [
+        ("Cash flows from operating activities", "", None),
+        ("Profit/(losses) for the year", "", _two("110", "105")),
+        ("Taxes", "", _two("40", "39")),
+        ("Depreciation/amortization", "", _two("50", "45")),
+        ("Interest expense", "", _two("35", "30")),
+        ("Cash flows from operating activities before changes in working capital", "",
+         _two("235", "219")),
+        ("(Increase) / decrease of inventories", "", _two("(10)", "(5)")),
+        ("(Increase) / decrease of receivables", "", _two("(20)", "(10)")),
+        ("Increase / (decrease) of liabilities", "", _two("100", "20")),
+        ("Income tax paid", "", _two("(30)", "(25)")),
+        ("Net cash generated from operating activities", "", _two("275", "199")),
+        ("Cash flows from investing activities", "", None),
+        ("Purchase of PPE", "", _two("(150)", "(100)")),
+        ("Purchase of investment property", "", _two("(10)", "-")),
+        ("Interest received", "", _two("5", "4")),
+        ("Net cash used in investing activities", "", _two("(155)", "(96)")),
+        ("Cash flows from financing activities", "", None),
+        ("Proceeds from borrowings", "", _two("50", "30")),
+        ("Repayment of borrowings", "", _two("(80)", "(40)")),
+        ("Interest paid", "", _two("(35)", "(30)")),
+        ("Dividends paid", "", _two("(5)", "(10)")),
+        ("Net cash used in financing activities", "", _two("(70)", "(50)")),
+        ("Net increase in cash and cash equivalents", "", _two("50", "53")),
+        ("Cash and cash equivalents at the beginning of the year", "", _two("150", "97")),
+        ("Cash and cash equivalents at the end of the year", "", _two("200", "150")),
+    ])
+    doc.new_page().insert_text((40, 60), "5. General information")
+    _dated_page(doc, [(40, "7.9 Trade and other receivables"), (60, "(Amounts in Euro)")], [
+        ("Trade receivables", "", _two("200", "190")),
+        ("Trade receivables - Related parties", "", _two("20", "10")),
+        ("Less: Impairment provisions", "", _two("(20)", "(20)")),
+        ("Final trade receivables", "", _two("200", "180")),
+        ("Other receivables", "", _two("100", "100")),
+        ("Total", "", _two("300", "280")),
+    ])
+    other = str(int(payables_total) - 260)
+    _dated_page(doc, [(40, "7.24 Trade and other payables"), (60, "(Amounts in Euro)")], [
+        ("Trade payables", "", _two("200", "150")),
+        ("Trade payables - related parties", "", _two("10", "10")),
+        ("Accrued expenses", "", _two("50", "50")),
+        ("Other liabilities", "", _two(other, "40")),
+        ("Total", "", _two(payables_total, "250")),
+    ])
+    doc.save(path)
+    doc.close()
+
+
+def _statement_run(pdf, settings):
+    from financial_workbench.statements import apply_statement_facts, statement_facts
+    pages, _ = read_pdf(pdf, pdf.name)
+
+    async def no_model(messages, **kwargs):
+        return '{"mappings":[]}'
+
+    facts, _ = asyncio.run(extract(pages, settings, lambda *_: None, complete=no_model))
+    notes, _ = enrich_financial_evidence(pages, settings)
+    structured, report = statement_facts(pages, settings, facts, notes)
+    merged, _ = merge_evidence(apply_statement_facts(facts, structured), notes)
+    values = {}
+    for c in merged:
+        values.setdefault((c["metric_id"], c["year"]), set()).add(Decimal(c["value"]))
+    return values, report, merged
+
+
+def test_complete_statements_fill_every_template_row_they_support(tmp_path):
+    pdf = tmp_path / "mini.pdf"
+    _mini_report(pdf)
+    settings = Settings(company="Mini", latest_year=2025, money_scale=1)
+    values, report, _ = _statement_run(pdf, settings)
+    assert report == []
+    got = {m: values.get((m, 2025)) for m in [
+        "balance_sheet_9", "balance_sheet_10", "balance_sheet_16", "balance_sheet_25",
+        "balance_sheet_27", "balance_sheet_28", "balance_sheet_31", "balance_sheet_36",
+        "balance_sheet_43", "balance_sheet_44", "balance_sheet_47", "balance_sheet_48",
+        "balance_sheet_50", "income_statement_9", "income_statement_11", "income_statement_14",
+        "income_statement_15", "income_statement_17", "income_statement_21", "income_statement_24",
+        "income_statement_26", "income_statement_27", "income_statement_29", "income_statement_30",
+        "cash_flow_statement_9", "cash_flow_statement_10", "cash_flow_statement_13",
+        "cash_flow_statement_15", "cash_flow_statement_26", "cash_flow_statement_35",
+        "cash_flow_statement_39", "cash_flow_statement_42", "changes_in_equity_7",
+        "changes_in_equity_9", "changes_in_equity_11", "changes_in_equity_12",
+        "changes_in_equity_15", "income_statement_31", "market_inputs_15"]}
+    assert got == {k: {Decimal(v)} for k, v in {
+        # Liquid investments are not presented and the current-asset lines tie.
+        "balance_sheet_9": "0",
+        # Combined receivables split by the note whose total equals the line.
+        "balance_sheet_10": "200", "balance_sheet_16": "170",
+        "balance_sheet_25": "30", "balance_sheet_27": "50",
+        "balance_sheet_28": "580",  # total assets − total current assets
+        "balance_sheet_31": "210", "balance_sheet_36": "140", "balance_sheet_43": "20",
+        "balance_sheet_44": "360", "balance_sheet_47": "150", "balance_sheet_48": "20",
+        "balance_sheet_50": "400",
+        "income_statement_9": "700", "income_statement_11": "0", "income_statement_14": "10",
+        # Other gains above operating results are operating; below, non-operating.
+        "income_statement_15": "-20", "income_statement_24": "10",
+        "income_statement_17": "50", "income_statement_21": "35", "income_statement_26": "40",
+        "income_statement_27": "0",
+        # The first attribution pair sums to profit; the second to comprehensive income.
+        "income_statement_29": "108", "income_statement_30": "2",
+        "cash_flow_statement_9": "50", "cash_flow_statement_10": "75",
+        "cash_flow_statement_13": "100",
+        # Interest is paid in financing, so none is paid within operating cash flow.
+        "cash_flow_statement_15": "0", "cash_flow_statement_26": "-10",
+        "cash_flow_statement_35": "-35", "cash_flow_statement_39": "0",
+        "cash_flow_statement_42": "0",
+        "changes_in_equity_7": "360", "changes_in_equity_9": "5", "changes_in_equity_11": "0",
+        "changes_in_equity_12": "-65", "changes_in_equity_15": "410",
+        "income_statement_31": "0", "market_inputs_15": "0",
+    }.items()}
+    # 2024 has a dash for the disposal gain: it is nil within a reconciled bridge.
+    assert values[("income_statement_24", 2024)] == {Decimal("0")}
+    assert values[("income_statement_15", 2024)] == {Decimal("15")}
+
+
+def test_unreconciled_section_gets_no_residual_or_zero(tmp_path):
+    """A section whose lines do not tie to its total must not be completed."""
+    pdf = tmp_path / "mini.pdf"
+    _mini_report(pdf)
+    settings = Settings(company="Mini", latest_year=2025, money_scale=1)
+    from financial_workbench.statements import statement_facts
+    pages, _ = read_pdf(pdf, pdf.name)
+    for panel in pages[0]["panels"]:
+        panel["rows"] = [r for r in panel["rows"] if r["label"] != "Other financial assets"]
+    facts, report = statement_facts(pages, settings)
+    produced = {f["metric_id"] for f in facts if f["year"] == 2025}
+    assert {"balance_sheet_25", "balance_sheet_26", "balance_sheet_27", "balance_sheet_28"}.isdisjoint(produced)
+    assert "balance_sheet_16" in produced  # other sections still reconcile
+    assert any(r["section"] == "NCA" and r["status"] == "mismatch" for r in report)
+
+
+def test_note_that_does_not_tie_to_the_statement_line_is_not_used_to_split(tmp_path):
+    pdf = tmp_path / "mini.pdf"
+    _mini_report(pdf, payables_total="360")
+    settings = Settings(company="Mini", latest_year=2025, money_scale=1)
+    values, _, _ = _statement_run(pdf, settings)
+    assert values[("balance_sheet_36", 2025)] == {Decimal("350")}
+    assert values.get(("balance_sheet_31", 2025), set()) <= {Decimal("210")}
+    assert not any(c for c in _statement_run(pdf, settings)[2]
+                   if c["metric_id"] == "balance_sheet_31" and c["page"] == 1 and c["year"] == 2025)
+
+
+def test_reconciled_statement_supersedes_a_line_mapping_on_the_same_page():
+    from financial_workbench.statements import apply_statement_facts
+    line = {"id": "l", "metric_id": "balance_sheet_16", "year": 2025, "value": "70",
+            "document_id": "d", "page": 1}
+    note = {"id": "n", "metric_id": "income_statement_22", "year": 2025, "value": "3",
+            "document_id": "d", "page": 9}
+    structured = {"id": "s", "metric_id": "balance_sheet_16", "year": 2025, "value": "170",
+                  "document_id": "d", "page": 1, "components": [{"page": 1}]}
+    assert [c["id"] for c in apply_statement_facts([line, note], [structured])] == ["n", "s"]
+
+
+def test_aktor_and_moh_statements_reconcile_into_the_template():
+    """Optional real-PDF regression for the reconciled statement layer."""
+    reports = {"AKTOR": os.environ.get("WORKBENCH_AKTOR_PDF"),
+               "MOH": os.environ.get("WORKBENCH_REPORT_PDF")}
+    if not all(reports.values()):
+        pytest.skip("Set WORKBENCH_AKTOR_PDF and WORKBENCH_REPORT_PDF to the FY2025 reports")
+    expected = {
+        "AKTOR": {"balance_sheet_10": "254.775833", "balance_sheet_16": "871.097788",
+                  "balance_sheet_28": "1294.936045", "balance_sheet_31": "535.957023",
+                  "income_statement_14": "9.147866", "income_statement_15": "-9.970851",
+                  "income_statement_17": "65.579979", "income_statement_22": "39.035163",
+                  "income_statement_29": "18.038508", "cash_flow_statement_10": "62.353481",
+                  "cash_flow_statement_35": "-59.572863", "changes_in_equity_10": "198.440998",
+                  "changes_in_equity_15": "398.819895", "market_inputs_10": "0.0899"},
+        "MOH": {"balance_sheet_10": "662.237", "balance_sheet_31": "877.252",
+                "income_statement_17": "286.142", "income_statement_22": "111.290",
+                "cash_flow_statement_10": "-290.956", "cash_flow_statement_17": "206.215",
+                "changes_in_equity_13": "22.138", "changes_in_equity_15": "3355.941",
+                "market_inputs_10": "5.98", "market_inputs_11": "5.97"},
+    }
+    for company, pdf in reports.items():
+        values, report, _ = _statement_run(Path(pdf), Settings(company=company, latest_year=2025))
+        assert report == [], (company, report)
+        for metric, amount in expected[company].items():
+            assert values[(metric, 2025)] == {Decimal(amount)}, (company, metric, values.get((metric, 2025)))
+        filled = {m for (m, y) in values if y == 2025}
+        assert len(filled & {m["id"] for m in CATALOG if m["automatic"]}) >= 105, company
+
+
+def test_worker_asks_model_only_about_unsettled_lines_and_exports_reconciled_rows(
+        tmp_path, monkeypatch):
+    import time
+
+    import financial_workbench.api as api_module
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-placeholder")
+    monkeypatch.delenv("WORKBENCH_API_KEY", raising=False)
+    asked = []
+
+    async def recording_model(messages, **kwargs):
+        asked.extend(r["label"] for r in json.loads(messages[1]["content"])["rows"])
+        return '{"mappings":[]}'
+
+    async def extraction(pages, config, progress, plan=None, **kwargs):
+        return await extract(pages, config, progress, complete=recording_model, plan=plan, **kwargs)
+
+    monkeypatch.setattr(api_module, "extract", extraction)
+    pdf = tmp_path / "mini.pdf"
+    _mini_report(pdf)
+    settings = {"company": "Mini", "language": "en", "latest_year": 2025, "currency": "EUR",
+                "scope": "consolidated", "money_scale": 1, "share_scale": 1}
+    with TestClient(create_app(tmp_path / "data")) as client:
+        job = client.post("/api/jobs", data={"settings": json.dumps(settings)},
+                          files=[("files", ("mini.pdf", pdf.read_bytes(), "application/pdf"))]).json()
+        for _ in range(300):
+            result = client.get(f"/api/jobs/{job['id']}").json()
+            if result["status"] in ("review", "failed"):
+                break
+            time.sleep(0.05)
+        assert result["status"] == "review", result.get("error")
+        assert result["statement_checks"] == []
+        book = openpyxl.load_workbook(BytesIO(client.get(
+            f"/api/jobs/{job['id']}/workbook?language=en&draft=true").content))
+    # Only lines that fell to a residual row are worth a model's opinion.
+    assert set(asked) <= {"Contract assets", "Other financial assets", "Reserves", "Grants",
+                          "Trade and other receivables", "Trade and other payables", "Taxes",
+                          "Interest expense", "Share premium", "Gain on disposal of subsidiary"}
+    assert "Property, plant and equipment" not in asked and "Sales" not in asked
+    sheet = book["Balance Sheet"]
+    assert (sheet["I10"].value, sheet["I16"].value, sheet["I9"].value) == (200, 170, 0)
+    assert book["Cash Flow Statement"]["I10"].value == 75
+    assert book["Changes in Equity"]["I15"].value == 410
+    review = {(r[0].value, r[1].value): r[6].value for r in book["Export Review"].iter_rows(min_row=2)}
+    assert review[("Liquid short-term investments", 2025)].startswith("No separate line")

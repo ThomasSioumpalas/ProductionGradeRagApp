@@ -32,6 +32,8 @@ NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\(?-?\d{1,3}(?:[,. ]\d{3})+(?:[,.]\d+)?\
 DATE_PATTERN = re.compile(r"(?:\d{1,2}[./]\d{1,2}(?:[./](?:\d{2,4})?)?[-–])?\d{1,2}[./]\d{1,2}[./]\d{2,4}$")
 YEAR_COLUMN = re.compile(r"20\d{2}(?:\([a-d]\))?", re.I)
 AMOUNT_PATTERN = re.compile(r"(?:\(?[+\-−]?\d[\d.,]*\)?|0)$")
+NOTE_TITLE = re.compile(r"^\s*\d{1,2}(?:\.\d{1,2}[a-z]?)?\.?\s+[A-Za-zΑ-Ωα-ω]")
+NOTE_REFERENCE = re.compile(r"\d{1,2}(?:[.,]\d{1,2})*[a-zα-ω]?,?", re.I)
 _TITLE_PREFIX = r"^\s*(?:\d{1,2}[.)]\s*)?(?:[\w-]+\s+){0,3}?(?:consolidated\s+|separate\s+)?"
 # Titles are matched on accent-stripped, casefolded text, so Greek headings
 # printed in capitals (ΚΑΤΑΣΤΑΣΗ ΤΑΜΕΙΑΚΩΝ ΡΟΩΝ) match their accented form.
@@ -201,7 +203,7 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
     # Accounting columns right-align the number under a short year heading.
     # Large amounts can begin to the left of the heading's first character.
     first = min(header["start"] for header in headers) - 16
-    rows, section = [], ""
+    rows, section, pending = [], "", None
     for line in lines:
         if line["y"] < headers[0]["y"] + 8:
             continue
@@ -216,13 +218,23 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
                 "financing activities", "shareholders' equity", "equity",
                 "other comprehensive income", "earnings per share",
             )):
-                section = label
+                section, pending = label, None
+            else:
+                pending = (label, line["y"]) if label else None
             continue
         if len(numbers) != len(headers) or (not include_unlabelled and not re.search(r"[^\W\d_]", label)):
+            pending = None
             continue
-        # Note references occupy the narrow gap just before the amount columns.
-        if len(label_words) > 1 and label_words[-1][0] > first - 85 and re.fullmatch(r"\d+(?:[.,]\d+)?[a-zα-ω]?", label_words[-1][4], re.I):
-            label = " ".join(word[4] for word in label_words[:-1]).strip()
+        # Note references (7.17a, 7.24α, 15,16, 7.2,3,4,5) occupy the narrow gap
+        # before the amount columns; a wrapped label can place one mid-label.
+        kept = [word for word in label_words
+                if not (word[0] > first - 85 and NOTE_REFERENCE.fullmatch(word[4]))]
+        if kept and len(kept) < len(label_words):
+            label = " ".join(word[4] for word in kept).strip()
+        # A label that wraps onto the amount line keeps its first line.
+        if pending and label[:1].islower() and line["y"] - pending[1] < 16:
+            label = f"{pending[0]} {label}"
+        pending = None
         values = []
         for header, word in zip(headers, numbers):
             if abs((word[0] + word[2]) / 2 - header["x"]) > 45:
@@ -249,6 +261,48 @@ def _table_rows(lines, headers, panel, page, include_unlabelled=False):
     return rows
 
 
+def _equity_rows(lines, panel, page, unit, unit_source, text):
+    """Rows of a statement of changes in equity with their total-equity amount.
+
+    The statement is a matrix: equity components across, movements down. The
+    workbook needs the rightmost (total equity) column. A row's amount is its
+    rightmost number, kept only when it sits under that column. Reconciliation
+    of opening + movements = closing happens where the rows are used.
+    """
+    head = _plain(text[:700])
+    group = re.search(r"\b(?:group|consolidated|ομιλ)", head)
+    company = re.search(r"\b(?:company|separate|εταιρ)", head)
+    scope = ("consolidated" if group and (not company or group.start() < company.start())
+             else "standalone" if company else None)
+    rows, pending = [], []
+    for line in lines:
+        words = sorted(line["words"], key=lambda w: w[0])
+        text_words = [w for w in words if re.search(r"[^\W\d_]", w[4])]
+        label_end = max((w[2] for w in text_words), default=0)
+        amounts = [w for w in words if w[0] > label_end and
+                   (AMOUNT_PATTERN.fullmatch(w[4]) or w[4] in ("-", "–", "—"))]
+        label = " ".join(w[4] for w in sorted((w for w in words if w not in amounts),
+                                              key=lambda w: (w[1], w[0]))).strip()
+        if len(amounts) < 3:
+            pending = pending + [label] if label and not amounts else []
+            continue
+        if pending and label[:1].islower():
+            label = " ".join(pending + [label])
+        pending = []
+        rightmost = amounts[-1]
+        rows.append({"row_id": f"{page['page']}:{panel['side']}:equity:{len(rows)}",
+                     "page": page["page"], "file": page["file"], "document_id": page["sha256"],
+                     "panel": panel["side"], "statement": "equity", "section": "",
+                     "label": label, "scope": scope, "currency": unit[0], "scale": unit[1],
+                     "unit_source": unit_source, "raw_total": rightmost[4],
+                     "x": round((rightmost[0] + rightmost[2]) / 2, 1), "y": round(line["y"], 1),
+                     "quote": " ".join(w[4] for w in words)})
+    if not rows:
+        return []
+    column = sorted(r["x"] for r in rows)[len(rows) // 2]
+    return [r for r in rows if abs(r["x"] - column) <= 25]
+
+
 def _annotate_statements(pages):
     """Label statement and note tables; return document-level unit warnings."""
     active = None
@@ -265,6 +319,9 @@ def _annotate_statements(pages):
             active, in_notes, document = None, bool(re.search(r"\bnotes?\b", page["file"], re.I)), page["sha256"]
             seen_statements = False
             statement_unit, previous_statement = None, None
+            # A note heading can sit in the previous column or page, above a
+            # table that continues without repeating it.
+            last_title = ""
         for panel in page["panels"]:
             text = panel["text"]
             note_heading = re.search(r"\bnotes\s+to\s+(?:the\s+)?(?:consolidated\s+)?financial\s+statements\b", text[:500], re.I)
@@ -280,6 +337,8 @@ def _annotate_statements(pages):
             if heading and not in_notes:
                 active = heading
             lines = _lines(panel.pop("_words"))
+            titles = [(line["y"], " ".join(w[4] for w in line["words"]))
+                      for line in lines if NOTE_TITLE.match(" ".join(w[4] for w in line["words"]))]
             headers = _table_headers(lines, text)
             unit = _unit(text)
             unit_source = f"declared on page {page['page']}" if unit else ""
@@ -316,15 +375,18 @@ def _annotate_statements(pages):
                     note_panel = {"side": panel["side"], "statement": "note",
                                   "currency": unit[0], "scale": unit[1],
                                   "unit_source": unit_source}
-                    titles = [(line["y"], " ".join(w[4] for w in line["words"]))
-                              for line in lines if re.match(r"^\s*\d{1,2}(?:\.\d{1,2}[a-z]?)?\.?\s+[A-Za-zΑ-Ωα-ω]",
-                                                     " ".join(w[4] for w in line["words"]))]
                     panel["note_rows"] = _table_rows(lines, headers, note_panel, page,
                                                        include_unlabelled=True)
                     for row in panel["note_rows"]:
-                        row["note_title"] = next((title for y, title in reversed(titles) if y < row["y"]), "")
+                        row["note_title"] = next((title for y, title in reversed(titles) if y < row["y"]),
+                                                 last_title if in_notes else "")
                     panel["note_headers"] = [{k: v for k, v in h.items() if k != "y"} for h in headers]
                     page["tables"] += "\n".join(row["quote"] for row in panel["note_rows"]) + "\n"
+                if panel["statement"] == "equity" and unit:
+                    panel["equity_rows"] = _equity_rows(lines, panel, page, unit, unit_source, text)
+                    page["tables"] += "\n".join(row["quote"] for row in panel["equity_rows"]) + "\n"
+            if titles:
+                last_title = titles[-1][1]
     warnings = []
     for (filename, _), units in units_by_document.items():
         if len(units) > 1:

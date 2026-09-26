@@ -126,6 +126,61 @@ def _finance_cost(panels, settings):
                                   "source": total["quote"]})
 
 
+def _note_total(rows, start, settings, year):
+    """The printed "Total" of the note table that begins at ``start``, if any."""
+    total = next((r for r in rows[start:] if _label(r["label"]) == "total"), None)
+    column = total and next((v for v in total["values"]
+                             if v["year"] == year and v["scope"] == settings.scope), None)
+    if not column:
+        return None
+    return {"raw": column["raw_value"], "value": str(_dash_amount(total, settings, year)),
+            "quote": total["quote"], "page": total["page"]}
+
+
+def _dash_amount(row, settings, year):
+    column = next((v for v in row["values"] if v["year"] == year and v["scope"] == settings.scope), None)
+    if not column:
+        return None
+    if column["raw_value"].strip() in ("-", "–", "—"):
+        return Decimal(0)
+    return _amount(row, settings.scope, year, settings)
+
+
+def _trade_payables(panels, settings):
+    """Trade payables from a trade-and-other-payables note whose lines tie to its total.
+
+    Trade lines are those named trade payables / suppliers, each with an
+    immediately following "related parties" sub-line. Every line above the
+    printed total must add up to it, or nothing is derived.
+    """
+    for _panel, rows in _source_rows(panels, "payable"):
+        names = [_label(r["label"]) for r in rows]
+        if "total" not in names:
+            continue
+        end = names.index("total")
+        trade = []
+        for i, name in enumerate(names[:end]):
+            if name.startswith("trade payable") or name in ("suppliers", "trade creditors"):
+                trade.append(rows[i])
+                if i + 1 < end and names[i + 1] == "related parties":
+                    trade.append(rows[i + 1])
+        if not trade:
+            continue
+        for year in range(settings.latest_year - 5, settings.latest_year + 1):
+            body = [_dash_amount(r, settings, year) for r in rows[:end]]
+            total = _dash_amount(rows[end], settings, year)
+            if total is None or any(v is None for v in body) or sum(body) != total:
+                continue
+            value = sum(_dash_amount(r, settings, year) for r in trade)
+            fact = _derived("balance_sheet_31", trade, settings, year, value,
+                            " + ".join(r["label"] for r in trade),
+                            check={"label": "Note lines = printed note total",
+                                   "reported": str(total), "calculated": str(sum(body)),
+                                   "source": rows[end]["quote"]})
+            fact["note_total"] = _note_total(rows, 0, settings, year)
+            yield fact
+
+
 def _trade_receivables(panels, settings):
     for _panel, rows in _source_rows(panels, "trade and other receivables"):
         names = [_label(r["label"]) for r in rows]
@@ -141,13 +196,15 @@ def _trade_receivables(panels, settings):
                     continue
                 if sum(values) != subtotal:
                     continue
-                yield _derived("balance_sheet_10", components + [reported], settings,
-                               year, subtotal,
-                               "Gross trade + related-party trade − impairment",
-                               check={"label": "Net trade receivables = printed final total",
-                                      "reported": str(subtotal),
-                                      "calculated": str(sum(values)),
-                                      "source": reported["quote"]})
+                fact = _derived("balance_sheet_10", components + [reported], settings,
+                                year, subtotal,
+                                "Gross trade + related-party trade − impairment",
+                                check={"label": "Net trade receivables = printed final total",
+                                       "reported": str(subtotal),
+                                       "calculated": str(sum(values)),
+                                       "source": reported["quote"]})
+                fact["note_total"] = _note_total(rows, i, settings, year)
+                yield fact
         for i, row in enumerate(rows):
             if _label(row["label"]) != "trade receivables" or len(rows) < i + 4:
                 continue
@@ -162,11 +219,13 @@ def _trade_receivables(panels, settings):
                 reported = _amount(subtotal, settings.scope, year, settings)
                 if reported is None or any(v is None for v in vals) or sum(vals) != reported:
                     continue
-                yield _derived("balance_sheet_10", components + [subtotal], settings, year,
-                               reported, "Gross trade receivables − loss allowance + trade related parties",
-                               check={"label": "Component sum = printed trade subtotal",
-                                      "reported": str(reported), "calculated": str(sum(vals)),
-                                      "source": subtotal["quote"]})
+                fact = _derived("balance_sheet_10", components + [subtotal], settings, year,
+                                reported, "Gross trade receivables − loss allowance + trade related parties",
+                                check={"label": "Component sum = printed trade subtotal",
+                                       "reported": str(reported), "calculated": str(sum(vals)),
+                                       "source": subtotal["quote"]})
+                fact["note_total"] = _note_total(rows, i, settings, year)
+                yield fact
 
 
 def _weighted_shares(panels, pages, settings):
@@ -279,13 +338,34 @@ def _reported_net_debt(panels, settings):
                    "mapping_source": "dated directors-report disclosure", "status": "candidate"}
 
 
+def _is_cash_flow_row(pages, fact):
+    page = next((p for p in pages if p["sha256"] == fact.get("document_id")
+                 and p["page"] == fact.get("page")), None)
+    return bool(page) and any(panel.get("statement") == "cash" and panel["side"] == fact.get("panel")
+                              for panel in page["panels"])
+
+
 def enrich_financial_evidence(pages, settings, search=None):
     """Query the persistent page index and validate only matched note panels."""
     cf = list(_cf_depreciation(pages, settings))
     finance = list(_finance_cost(_panels_for(pages, search, "finance cost"), settings))
     trade = list(_trade_receivables(_panels_for(pages, search, "trade receivables"), settings))
+    trade += list(_trade_payables(_panels_for(pages, search, "trade payables"), settings))
     shares = list(_weighted_shares(_panels_for(pages, search, "weighted average ordinary shares"), pages, settings))
     direct = list(_direct_note_facts(pages, settings))
+    # An itemised finance-cost note separates interest from letters-of-credit
+    # fees, discounting and FX. It is preferred to a cash-flow add-back merely
+    # labelled "interest expense" for the same year and report.
+    bridged = {(f["year"], f["document_id"]): f for f in finance
+               if f["metric_id"] == "income_statement_22"}
+    for fact in [f for f in direct if f["metric_id"] == "income_statement_22"
+                 and (f["year"], f["document_id"]) in bridged and f.get("section", "") != "note"
+                 and _is_cash_flow_row(pages, f)]:
+        direct.remove(fact)
+        bridged[(fact["year"], fact["document_id"])].setdefault("superseded", []).append(
+            {"file": fact["file"], "page": fact["page"], "label": fact.get("row_label", ""),
+             "value": fact["value"],
+             "reason": "Cash-flow add-back; the itemised finance-cost note separates interest"})
     narrative = list(_narrative(_panels_for(pages, search, "closing price share")
                                 + _panels_for(pages, search, "ebitda group"), pages, settings))
     net_debt = list(_reported_net_debt(_panels_for(pages, search, "net debt group"), settings))
