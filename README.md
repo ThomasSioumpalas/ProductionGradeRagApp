@@ -1,3 +1,20 @@
+# Financial RAG Agent
+
+## Bilingual Financial Workbench
+
+Upload company PDFs, review extracted figures with document/page evidence, and export the supplied Greek or English Excel template with its financial statements and KPI formulas. Includes a React/TypeScript interface, Python API, persistent analyses, conflict review and manual inputs.
+
+See **[WORKBENCH.md](WORKBENCH.md)** for setup, architecture, supported inputs and limitations.
+
+```bash
+# Set GROQ_API_KEY in .env first
+docker compose -f compose.workbench.yaml up --build
+```
+
+Open http://localhost:3000.
+
+## Original RAG application
+
 Financial RAG Agent
 
 A local RAG (Retrieval-Augmented Generation) app that lets you ingest financial PDFs and ask questions about them. Built with FastAPI, Inngest, Qdrant, and Llama 3 LLM via Groq.

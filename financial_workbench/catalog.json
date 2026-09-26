@@ -1,0 +1,1982 @@
+[
+  {
+    "id": "balance_sheet_8",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 8,
+    "label": {
+      "en": "Cash and cash equivalents",
+      "el": "Ταμειακά διαθέσιμα και ισοδύναμα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_9",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 9,
+    "label": {
+      "en": "Liquid short-term investments",
+      "el": "Ρευστοποιήσιμες βραχυπρόθεσμες επενδύσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_10",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 10,
+    "label": {
+      "en": "Trade receivables",
+      "el": "Εμπορικές απαιτήσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_11",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 11,
+    "label": {
+      "en": "Inventories",
+      "el": "Αποθέματα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_12",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 12,
+    "label": {
+      "en": "Prepayments",
+      "el": "Προπληρωμές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_13",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 13,
+    "label": {
+      "en": "Income tax receivables",
+      "el": "Απαιτήσεις φόρου εισοδήματος"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_14",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 14,
+    "label": {
+      "en": "Current derivative assets",
+      "el": "Κυκλοφορούντα παράγωγα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_15",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 15,
+    "label": {
+      "en": "Restricted short-term deposits",
+      "el": "Δεσμευμένες βραχυπρόθεσμες καταθέσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_16",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 16,
+    "label": {
+      "en": "Other current assets",
+      "el": "Λοιπά κυκλοφορούντα στοιχεία"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_17",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 17,
+    "label": {
+      "en": "Total current assets, reported",
+      "el": "Σύνολο κυκλοφορούντος ενεργητικού"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_19",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 19,
+    "label": {
+      "en": "Property, plant and equipment, net",
+      "el": "Ενσώματα πάγια, καθαρή αξία"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_20",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 20,
+    "label": {
+      "en": "Right-of-use assets",
+      "el": "Περιουσιακά στοιχεία δικαιώματος χρήσης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_21",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 21,
+    "label": {
+      "en": "Goodwill",
+      "el": "Υπεραξία"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_22",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 22,
+    "label": {
+      "en": "Other intangible assets",
+      "el": "Λοιπά άυλα περιουσιακά στοιχεία"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_23",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 23,
+    "label": {
+      "en": "Investments in associates and joint ventures",
+      "el": "Επενδύσεις σε συγγενείς και κοινοπραξίες"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_24",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 24,
+    "label": {
+      "en": "Investments in subsidiaries",
+      "el": "Επενδύσεις σε θυγατρικές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_25",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 25,
+    "label": {
+      "en": "Other non-current financial assets",
+      "el": "Λοιπά μη κυκλοφορούντα χρηματοοικονομικά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_26",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 26,
+    "label": {
+      "en": "Deferred tax assets",
+      "el": "Αναβαλλόμενες φορολογικές απαιτήσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_27",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 27,
+    "label": {
+      "en": "Other non-current assets",
+      "el": "Λοιπά μη κυκλοφορούντα στοιχεία"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_28",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 28,
+    "label": {
+      "en": "Total non-current assets, reported",
+      "el": "Σύνολο μη κυκλοφορούντος ενεργητικού"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_29",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 29,
+    "label": {
+      "en": "Total assets, reported",
+      "el": "Σύνολο ενεργητικού"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_31",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 31,
+    "label": {
+      "en": "Trade payables only",
+      "el": "Εμπορικές υποχρεώσεις προς προμηθευτές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_32",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 32,
+    "label": {
+      "en": "Short-term borrowings and current maturities",
+      "el": "Βραχυπρόθεσμα δάνεια και τρέχουσες δόσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_33",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 33,
+    "label": {
+      "en": "Current lease liabilities",
+      "el": "Βραχυπρόθεσμες υποχρεώσεις μισθώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_34",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 34,
+    "label": {
+      "en": "Income taxes payable",
+      "el": "Τρέχουσες φορολογικές υποχρεώσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_35",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 35,
+    "label": {
+      "en": "Current provisions",
+      "el": "Βραχυπρόθεσμες προβλέψεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_36",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 36,
+    "label": {
+      "en": "Other current liabilities",
+      "el": "Λοιπές βραχυπρόθεσμες υποχρεώσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_37",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 37,
+    "label": {
+      "en": "Total current liabilities, reported",
+      "el": "Σύνολο βραχυπρόθεσμων υποχρεώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_39",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 39,
+    "label": {
+      "en": "Long-term borrowings",
+      "el": "Μακροπρόθεσμα δάνεια"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_40",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 40,
+    "label": {
+      "en": "Non-current lease liabilities",
+      "el": "Μακροπρόθεσμες υποχρεώσεις μισθώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_41",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 41,
+    "label": {
+      "en": "Employee benefit obligations",
+      "el": "Υποχρεώσεις παροχών προσωπικού"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_42",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 42,
+    "label": {
+      "en": "Deferred tax liabilities",
+      "el": "Αναβαλλόμενες φορολογικές υποχρεώσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_43",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 43,
+    "label": {
+      "en": "Other non-current liabilities",
+      "el": "Λοιπές μακροπρόθεσμες υποχρεώσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_44",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 44,
+    "label": {
+      "en": "Total non-current liabilities, reported",
+      "el": "Σύνολο μακροπρόθεσμων υποχρεώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_45",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 45,
+    "label": {
+      "en": "Total liabilities, reported",
+      "el": "Σύνολο υποχρεώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_47",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 47,
+    "label": {
+      "en": "Share capital and share premium",
+      "el": "Μετοχικό κεφάλαιο και υπέρ το άρτιο"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_48",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 48,
+    "label": {
+      "en": "Reserves and treasury shares, net",
+      "el": "Αποθεματικά και ίδιες μετοχές, καθαρά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_49",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 49,
+    "label": {
+      "en": "Retained earnings",
+      "el": "Κέρδη εις νέον"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_50",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 50,
+    "label": {
+      "en": "Equity attributable to parent owners",
+      "el": "Ίδια κεφάλαια μετόχων μητρικής"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_51",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 51,
+    "label": {
+      "en": "Non-controlling interests",
+      "el": "Μη ελέγχουσες συμμετοχές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_52",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 52,
+    "label": {
+      "en": "Total equity, reported",
+      "el": "Σύνολο ιδίων κεφαλαίων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_53",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 53,
+    "label": {
+      "en": "Preferred equity included in parent equity",
+      "el": "Προνομιούχα κεφάλαια εντός μητρικής"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "balance_sheet_54",
+    "sheet": {
+      "en": "Balance Sheet",
+      "el": "Ισολογισμός"
+    },
+    "row": 54,
+    "label": {
+      "en": "Past-due liabilities, optional",
+      "el": "Ληξιπρόθεσμες υποχρεώσεις, προαιρετικά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_8",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 8,
+    "label": {
+      "en": "Revenue",
+      "el": "Κύκλος εργασιών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_9",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 9,
+    "label": {
+      "en": "Cost of sales",
+      "el": "Κόστος πωληθέντων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_10",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 10,
+    "label": {
+      "en": "Gross profit, reported",
+      "el": "Μικτό κέρδος"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_11",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 11,
+    "label": {
+      "en": "Selling and distribution expenses",
+      "el": "Έξοδα διάθεσης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_12",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 12,
+    "label": {
+      "en": "Administrative expenses",
+      "el": "Έξοδα διοίκησης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_13",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 13,
+    "label": {
+      "en": "Research and development expense",
+      "el": "Έξοδα έρευνας και ανάπτυξης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_14",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 14,
+    "label": {
+      "en": "Other operating expenses",
+      "el": "Λοιπά λειτουργικά έξοδα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_15",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 15,
+    "label": {
+      "en": "Other operating income and gains, net",
+      "el": "Λοιπά λειτουργικά έσοδα και κέρδη, καθαρά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_16",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 16,
+    "label": {
+      "en": "Operating profit (EBIT), reported",
+      "el": "Λειτουργικά κέρδη (EBIT)"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_17",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 17,
+    "label": {
+      "en": "Total depreciation and amortisation",
+      "el": "Σύνολο αποσβέσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_18",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 18,
+    "label": {
+      "en": "EBITDA, reported (optional control)",
+      "el": "Δημοσιευμένο EBITDA (προαιρετικός έλεγχος)"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_20",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 20,
+    "label": {
+      "en": "Finance income",
+      "el": "Χρηματοοικονομικά έσοδα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_21",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 21,
+    "label": {
+      "en": "Finance costs, total",
+      "el": "Σύνολο χρηματοοικονομικών εξόδων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_22",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 22,
+    "label": {
+      "en": "Interest expense within finance costs",
+      "el": "Χρεωστικοί τόκοι εντός χρηματοοικονομικών εξόδων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_23",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 23,
+    "label": {
+      "en": "Share of associates profit or loss",
+      "el": "Μερίδιο κερδών ή ζημιών συγγενών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_24",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 24,
+    "label": {
+      "en": "Other non-operating gains or losses",
+      "el": "Λοιπά μη λειτουργικά κέρδη ή ζημιές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_25",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 25,
+    "label": {
+      "en": "Profit before tax, reported",
+      "el": "Κέρδη προ φόρων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_26",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 26,
+    "label": {
+      "en": "Income tax expense (benefit negative)",
+      "el": "Φόρος εισοδήματος (όφελος αρνητικό)"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_27",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 27,
+    "label": {
+      "en": "Profit from discontinued operations after tax",
+      "el": "Κέρδη διακοπεισών δραστηριοτήτων μετά φόρων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_28",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 28,
+    "label": {
+      "en": "Net profit, total group",
+      "el": "Καθαρά κέρδη ομίλου"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_29",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 29,
+    "label": {
+      "en": "Net profit attributable to parent owners",
+      "el": "Καθαρά κέρδη μετόχων μητρικής"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_30",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 30,
+    "label": {
+      "en": "Net profit attributable to non-controlling interests",
+      "el": "Καθαρά κέρδη μη ελεγχουσών συμμετοχών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_31",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 31,
+    "label": {
+      "en": "Preferred dividends allocated to this period",
+      "el": "Προνομιούχα μερίσματα της χρήσης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_32",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 32,
+    "label": {
+      "en": "Purchases used for supplier turnover",
+      "el": "Αγορές για τον δείκτη ταχύτητας προμηθευτών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "income_statement_33",
+    "sheet": {
+      "en": "Income Statement",
+      "el": "Αποτελέσματα Χρήσης"
+    },
+    "row": 33,
+    "label": {
+      "en": "Credit sales, optional",
+      "el": "Πωλήσεις επί πιστώσει, προαιρετικά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_8",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 8,
+    "label": {
+      "en": "Starting profit in the cash flow statement",
+      "el": "Αρχικό ποσό κερδών της κατάστασης ροών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_9",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 9,
+    "label": {
+      "en": "Depreciation and amortisation adjustment",
+      "el": "Προσαρμογή αποσβέσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_10",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 10,
+    "label": {
+      "en": "Other non-cash adjustments",
+      "el": "Λοιπές μη ταμειακές προσαρμογές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_11",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 11,
+    "label": {
+      "en": "Inventory cash flow adjustment",
+      "el": "Ταμειακή μεταβολή αποθεμάτων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_12",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 12,
+    "label": {
+      "en": "Receivables cash flow adjustment",
+      "el": "Ταμειακή μεταβολή απαιτήσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_13",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 13,
+    "label": {
+      "en": "Payables cash flow adjustment",
+      "el": "Ταμειακή μεταβολή υποχρεώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_14",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 14,
+    "label": {
+      "en": "Other working-capital cash flow adjustments",
+      "el": "Λοιπές ταμειακές μεταβολές κεφαλαίου κίνησης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_15",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 15,
+    "label": {
+      "en": "Interest paid within operating cash flow",
+      "el": "Τόκοι πληρωθέντες εντός λειτουργικών ροών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_16",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 16,
+    "label": {
+      "en": "Income tax paid within operating cash flow",
+      "el": "Φόροι πληρωθέντες εντός λειτουργικών ροών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_17",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 17,
+    "label": {
+      "en": "Other operating cash flows",
+      "el": "Λοιπές λειτουργικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_18",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 18,
+    "label": {
+      "en": "Net operating cash flow, reported",
+      "el": "Καθαρές λειτουργικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_20",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 20,
+    "label": {
+      "en": "Purchases of PPE and intangible assets",
+      "el": "Αγορές ενσώματων και άυλων παγίων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_21",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 21,
+    "label": {
+      "en": "Proceeds from disposal of fixed assets",
+      "el": "Εισπράξεις από πωλήσεις παγίων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_22",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 22,
+    "label": {
+      "en": "Business acquisitions, net cash",
+      "el": "Εξαγορές επιχειρήσεων, καθαρή ροή"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_23",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 23,
+    "label": {
+      "en": "Purchases and sales of investments, net",
+      "el": "Αγορές και πωλήσεις επενδύσεων, καθαρά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_24",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 24,
+    "label": {
+      "en": "Interest received classified as investing",
+      "el": "Τόκοι εισπραχθέντες στις επενδυτικές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_25",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 25,
+    "label": {
+      "en": "Dividends received classified as investing",
+      "el": "Μερίσματα εισπραχθέντα στις επενδυτικές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_26",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 26,
+    "label": {
+      "en": "Other investing cash flows",
+      "el": "Λοιπές επενδυτικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_27",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 27,
+    "label": {
+      "en": "Net investing cash flow, reported",
+      "el": "Καθαρές επενδυτικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_29",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 29,
+    "label": {
+      "en": "Proceeds from share issues",
+      "el": "Εισπράξεις από έκδοση μετοχών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_30",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 30,
+    "label": {
+      "en": "Share repurchases",
+      "el": "Αγορές ιδίων μετοχών"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_31",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 31,
+    "label": {
+      "en": "New borrowings",
+      "el": "Εισπράξεις νέων δανείων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_32",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 32,
+    "label": {
+      "en": "Debt principal repayments",
+      "el": "Αποπληρωμές κεφαλαίου δανείων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_33",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 33,
+    "label": {
+      "en": "Lease principal repayments",
+      "el": "Αποπληρωμές κεφαλαίου μισθώσεων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_34",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 34,
+    "label": {
+      "en": "Dividends paid",
+      "el": "Μερίσματα πληρωθέντα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_35",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 35,
+    "label": {
+      "en": "Interest paid classified as financing",
+      "el": "Τόκοι πληρωθέντες στις χρηματοδοτικές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_36",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 36,
+    "label": {
+      "en": "Other financing cash flows",
+      "el": "Λοιπές χρηματοδοτικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_37",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 37,
+    "label": {
+      "en": "Net financing cash flow, reported",
+      "el": "Καθαρές χρηματοδοτικές ταμειακές ροές"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_39",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 39,
+    "label": {
+      "en": "Exchange-rate effect on cash",
+      "el": "Συναλλαγματικές διαφορές διαθεσίμων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_40",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 40,
+    "label": {
+      "en": "Cash at beginning of period",
+      "el": "Διαθέσιμα αρχής περιόδου"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_41",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 41,
+    "label": {
+      "en": "Cash at end of period",
+      "el": "Διαθέσιμα τέλους περιόδου"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_42",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 42,
+    "label": {
+      "en": "CF cash less balance-sheet cash, explained",
+      "el": "Διαφορά διαθεσίμων ροών και ισολογισμού"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "cash_flow_statement_43",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 43,
+    "label": {
+      "en": "Estimated maintenance capex (positive)",
+      "el": "Εκτιμώμενες επενδύσεις συντήρησης (θετικές)"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": false
+  },
+  {
+    "id": "cash_flow_statement_44",
+    "sheet": {
+      "en": "Cash Flow Statement",
+      "el": "Κατάσταση Ταμειακών Ροών"
+    },
+    "row": 44,
+    "label": {
+      "en": "Company-defined core operating cash flow",
+      "el": "Βασική λειτουργική ροή κατά τον ορισμό της εταιρείας"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_7",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 7,
+    "label": {
+      "en": "Opening total equity, restated",
+      "el": "Συνολικά ίδια κεφάλαια αρχής, αναμορφωμένα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_8",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 8,
+    "label": {
+      "en": "Net profit for the year",
+      "el": "Καθαρά κέρδη χρήσης"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_9",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 9,
+    "label": {
+      "en": "Other comprehensive income",
+      "el": "Λοιπά συνολικά εισοδήματα"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_10",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 10,
+    "label": {
+      "en": "Share issues and option exercises",
+      "el": "Αυξήσεις κεφαλαίου και άσκηση δικαιωμάτων"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_11",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 11,
+    "label": {
+      "en": "Treasury share transactions, net",
+      "el": "Συναλλαγές ιδίων μετοχών, καθαρά"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_12",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 12,
+    "label": {
+      "en": "Dividends recognised in equity",
+      "el": "Μερίσματα αναγνωρισμένα στα ίδια κεφάλαια"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_13",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 13,
+    "label": {
+      "en": "Changes in ownership and NCI",
+      "el": "Μεταβολές συμμετοχών και μειοψηφίας"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_14",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 14,
+    "label": {
+      "en": "Other changes including restatements",
+      "el": "Λοιπές μεταβολές και αναμορφώσεις"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "changes_in_equity_15",
+    "sheet": {
+      "en": "Changes in Equity",
+      "el": "Μεταβολές Ιδίων Κεφαλαίων"
+    },
+    "row": 15,
+    "label": {
+      "en": "Closing total equity, reported",
+      "el": "Συνολικά ίδια κεφάλαια τέλους"
+    },
+    "unit": "money",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_7",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 7,
+    "label": {
+      "en": "Year-end share price",
+      "el": "Τιμή μετοχής τέλους χρήσης"
+    },
+    "unit": "per_share",
+    "guidance": "Currency units per share, not millions.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_8",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 8,
+    "label": {
+      "en": "Year-end ordinary shares outstanding",
+      "el": "Κοινές μετοχές σε κυκλοφορία τέλους χρήσης"
+    },
+    "unit": "shares",
+    "guidance": "Exclude treasury shares. Use share scale in Setup.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_9",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 9,
+    "label": {
+      "en": "Weighted-average basic ordinary shares",
+      "el": "Σταθμισμένος μέσος όρος κοινών μετοχών"
+    },
+    "unit": "shares",
+    "guidance": "For basic EPS, distinct from closing share count.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_10",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 10,
+    "label": {
+      "en": "Basic EPS, reported",
+      "el": "Δημοσιευμένα βασικά κέρδη ανά μετοχή"
+    },
+    "unit": "per_share",
+    "guidance": "Split-adjusted consistently with price.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_11",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 11,
+    "label": {
+      "en": "Diluted EPS, reported",
+      "el": "Απομειωμένα κέρδη ανά μετοχή"
+    },
+    "unit": "per_share",
+    "guidance": "Use the company figure; dilution needs instrument-specific adjustments.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_12",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 12,
+    "label": {
+      "en": "Dividend per ordinary share for fiscal year",
+      "el": "Μέρισμα ανά κοινή μετοχή για τη χρήση"
+    },
+    "unit": "per_share",
+    "guidance": "Allocated dividend, not necessarily cash paid in this year.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_13",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 13,
+    "label": {
+      "en": "Cash dividend per share received in calendar period",
+      "el": "Ταμειακό μέρισμα ανά μετοχή εντός περιόδου"
+    },
+    "unit": "per_share",
+    "guidance": "For price-plus-dividend return; consistent split basis.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_14",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 14,
+    "label": {
+      "en": "Common dividends allocated to fiscal year",
+      "el": "Κοινά μερίσματα που αφορούν τη χρήση"
+    },
+    "unit": "money",
+    "guidance": "Monetary scale in Setup; for payout ratio.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_15",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 15,
+    "label": {
+      "en": "Market value of preferred equity",
+      "el": "Αγοραία αξία προνομιούχων κεφαλαίων"
+    },
+    "unit": "money",
+    "guidance": "Enter zero if none.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_16",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 16,
+    "label": {
+      "en": "Value of non-controlling interests for EV",
+      "el": "Αξία μη ελεγχουσών συμμετοχών για EV"
+    },
+    "unit": "money",
+    "guidance": "If book value is used as proxy, document it.",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_17",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 17,
+    "label": {
+      "en": "Normalised operating tax rate",
+      "el": "Κανονικοποιημένος λειτουργικός φορολογικός συντελεστής"
+    },
+    "unit": "ratio",
+    "guidance": "Analyst input for NOPAT; 0–100%.",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_18",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 18,
+    "label": {
+      "en": "Cost of capital (WACC), optional",
+      "el": "Σταθμισμένο κόστος κεφαλαίου, προαιρετικά"
+    },
+    "unit": "ratio",
+    "guidance": "For ROIC spread and economic profit.",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_19",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 19,
+    "label": {
+      "en": "Comparable high-grade bond yield",
+      "el": "Απόδοση συγκρίσιμου ομολόγου υψηλής διαβάθμισης"
+    },
+    "unit": "ratio",
+    "guidance": "Match currency and valuation date.",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_20",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 20,
+    "label": {
+      "en": "Annual low share price",
+      "el": "Ελάχιστη ετήσια τιμή μετοχής"
+    },
+    "unit": "per_share",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_21",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 21,
+    "label": {
+      "en": "Annual high share price",
+      "el": "Μέγιστη ετήσια τιμή μετοχής"
+    },
+    "unit": "per_share",
+    "guidance": "",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_22",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 22,
+    "label": {
+      "en": "Benchmark price index level",
+      "el": "Τιμή δείκτη αναφοράς"
+    },
+    "unit": "number",
+    "guidance": "Price-return benchmark; excludes dividends.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_23",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 23,
+    "label": {
+      "en": "Producer or wholesale price index level",
+      "el": "Τιμή δείκτη τιμών παραγωγού ή χονδρικής"
+    },
+    "unit": "number",
+    "guidance": "For inflation context; not a stock-price input.",
+    "automatic": true
+  },
+  {
+    "id": "market_inputs_24",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 24,
+    "label": {
+      "en": "Selected fair P/E multiple",
+      "el": "Επιλεγμένος εύλογος πολλαπλασιαστής P/E"
+    },
+    "unit": "number",
+    "guidance": "Provide peer or historical evidence beside the input.",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_25",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 25,
+    "label": {
+      "en": "Selected fair P/B multiple",
+      "el": "Επιλεγμένος εύλογος πολλαπλασιαστής P/B"
+    },
+    "unit": "number",
+    "guidance": "",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_26",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 26,
+    "label": {
+      "en": "Selected fair EV/EBITDA multiple",
+      "el": "Επιλεγμένος εύλογος EV/EBITDA"
+    },
+    "unit": "number",
+    "guidance": "",
+    "automatic": false
+  },
+  {
+    "id": "market_inputs_27",
+    "sheet": {
+      "en": "Market Inputs",
+      "el": "Χρηματιστηριακά Δεδομένα"
+    },
+    "row": 27,
+    "label": {
+      "en": "Required margin of safety",
+      "el": "Απαιτούμενο περιθώριο ασφαλείας"
+    },
+    "unit": "ratio",
+    "guidance": "Analyst assumption, 0–100%.",
+    "automatic": false
+  }
+]

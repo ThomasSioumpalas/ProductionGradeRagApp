@@ -1,0 +1,26 @@
+services:
+  workbench-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.workbench
+    env_file: .env
+    environment:
+      WORKBENCH_DATA_DIR: /data
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - workbench_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  workbench-ui:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      workbench-api:
+        condition: service_healthy
+volumes:
+  workbench_data:

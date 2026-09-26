@@ -1,0 +1,2 @@
+-r requirements-workbench.txt
+pytest>=8,<10
